@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.1.0
+// @version      3.2.0
 // @description  Pairs(Web版)コパイロット（👤プロフ取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -149,7 +149,7 @@
         <div id="copilot-results-container"></div>
 
         <div style="margin-top: 4px; border-top: 1px solid #f1f5f9; padding-top: 8px; display:flex; justify-content:space-between; align-items:center;">
-          <button id="copilot-copy-md-btn" style="background:none; border:none; color:#64748b; font-size:11px; cursor:pointer; padding:0;">📋 相談用Markdownコピー（差分）</button>
+          <button id="copilot-copy-md-btn" style="background:none; border:none; color:#64748b; font-size:11px; cursor:pointer; padding:0;">📋 相談用Markdownコピー（全項目）</button>
           <span id="copilot-sync-status" style="font-size: 11px; color: #059669; font-weight: 500;"></span>
         </div>
       </div>
@@ -180,7 +180,8 @@
     name: 'お相手',
     age: '',
     location: '',
-    tweet: '',
+    loginStatus: '',
+    likes: '',
     details: {},
     rawProfile: '',
     profileText: '',
@@ -258,7 +259,7 @@
       autoSyncToLocal();
       fetchProfileBtn.textContent = '👤 プロフ取得';
       fetchProfileBtn.disabled = false;
-      showToast('✅ プロフィールを解析・保存しました！');
+      showToast('✅ プロフィールを全項目解析・保存しました！');
     }, 150);
   });
 
@@ -285,7 +286,7 @@
         extractChatMessages();
         updatePreview();
         autoSyncToLocal();
-        showToast('✅ 貼り付けたテキストから解析・保存しました！');
+        showToast('✅ 貼り付けたテキストから全項目解析・保存しました！');
       } else {
         const input = prompt('プロフィールのテキストをここに貼り付けてください:');
         if (input && input.trim()) {
@@ -293,7 +294,7 @@
           extractChatMessages();
           updatePreview();
           autoSyncToLocal();
-          showToast('✅ 解析・保存しました！');
+          showToast('✅ 全項目解析・保存しました！');
         }
       }
     } catch (e) {
@@ -303,54 +304,81 @@
         extractChatMessages();
         updatePreview();
         autoSyncToLocal();
-        showToast('✅ 解析・保存しました！');
+        showToast('✅ 全項目解析・保存しました！');
       }
     }
   });
 
-  function parseProfileTextContent(allText) {
-    if (!allText) return;
-    cachedData.rawProfile = allText;
+  function parseProfileTextContent(text) {
+    if (!text) return;
+    cachedData.rawProfile = text;
 
-    const lines = allText.split('\n').map(l => l.trim()).filter(Boolean);
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-    for (let i = 0; i < Math.min(lines.length, 15); i++) {
-      const line = lines[i];
-      const ageLocMatch = line.match(/^(\d{2}歳)\s*([^\s\d]+)?/);
-      if (ageLocMatch) {
-        cachedData.age = ageLocMatch[1];
-        if (ageLocMatch[2]) cachedData.location = ageLocMatch[2];
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+      const l = lines[i];
+      const ageLoc = l.match(/^(\d{2}歳)\s*([^\s\d]+)?/);
+      if (ageLoc) {
+        cachedData.age = ageLoc[1];
+        if (ageLoc[2]) cachedData.location = ageLoc[2];
         if (i > 0 && lines[i - 1].length <= 20 && !lines[i - 1].includes('Pairs') && !lines[i - 1].includes('戻る')) {
           cachedData.name = lines[i - 1];
         }
-        break;
+      }
+      if (l.includes('以内') || l.includes('オンライン') || l.includes('日前')) {
+        cachedData.loginStatus = l;
+      }
+      if (l.includes('いいね')) {
+        cachedData.likes = l;
       }
     }
 
-    const qMatch = allText.match(/(?:ペアーズクエスチョン|Pairsクエスチョン)\s*\n+([\s\S]+?)(?=\n+\s*(?:マイタグ|自己紹介|プロフィール|基本情報|$))/i);
-    if (qMatch) {
-      const qLines = qMatch[1].split('\n').map(s => s.trim()).filter(s => s && !s.includes('許容感覚') && !s.includes('共通点'));
-      if (qLines.length >= 2) {
-        cachedData.question = `${qLines[0]} ➔ ${qLines[1]}`;
-      } else if (qLines.length === 1) {
-        cachedData.question = qLines[0];
+    const qIdx = lines.findIndex(l => l.includes('ペアーズクエスチョン'));
+    if (qIdx !== -1) {
+      const qItems = [];
+      for (let i = qIdx + 1; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.startsWith('マイタグ') || l.startsWith('自己紹介') || l.startsWith('プロフィール')) break;
+        if (l !== '許容感覚' && l !== '共通点') {
+          qItems.push(l);
+        }
+      }
+      if (qItems.length >= 2) {
+        cachedData.question = `Q: ${qItems[0]} ➔ A: ${qItems[1]}`;
+      } else if (qItems.length === 1) {
+        cachedData.question = qItems[0];
       }
     }
 
-    const tagMatch = allText.match(/マイタグ\s*\n+([\s\S]+?)(?=\n+\s*(?:自己紹介|プロフィール|基本情報|$))/i);
-    if (tagMatch) {
-      const tLines = tagMatch[1].split('\n')
-        .map(s => s.replace(/\[|\]|\(http[^)]+\)/g, '').trim())
-        .filter(s => s && s.length >= 3 && !s.includes('すべて見る') && !s.match(/^(写真|本人確認|オンライン|生活|美容・健康|恋愛・結婚)$/));
-      const cleanTags = tLines.map(t => t.split(/生活|美容|恋愛|心と身体/)[0].trim()).filter(Boolean);
-      if (cleanTags.length > 0) {
-        cachedData.tags = [...new Set(cleanTags)].slice(0, 15);
+    const tagIdx = lines.findIndex(l => l.startsWith('マイタグ'));
+    if (tagIdx !== -1) {
+      const tags = [];
+      for (let i = tagIdx + 1; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.startsWith('自己紹介') || l.startsWith('プロフィール')) break;
+        if (l.includes('すべて見る')) continue;
+        
+        let cleanTag = l;
+        const mdMatch = l.match(/\[(.*?)\]/);
+        if (mdMatch) cleanTag = mdMatch[1];
+        
+        cleanTag = cleanTag.replace(/心と身体|美容・健康|恋愛・結婚|生活|趣味|仕事$/, '').trim();
+        if (cleanTag && cleanTag.length >= 2) {
+          tags.push(cleanTag);
+        }
       }
+      if (tags.length > 0) cachedData.tags = tags;
     }
 
-    const bioMatch = allText.match(/(?:自己紹介|自己紹介文)\s*\n+([\s\S]+?)(?=\n+\s*(?:プロフィール|基本情報|学歴|恋愛|性格|マイタグ|つぶやき|$))/i);
-    if (bioMatch && bioMatch[1].trim().length >= 10) {
-      cachedData.profileText = bioMatch[1].trim().slice(0, 3000);
+    const bioIdx = lines.findIndex(l => l.startsWith('自己紹介'));
+    if (bioIdx !== -1) {
+      const bioLines = [];
+      for (let i = bioIdx + 1; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.startsWith('プロフィール') || l === '基本情報' || l === '学歴・職種・外見' || l === '恋愛・結婚について' || l === '性格・趣味・生活') break;
+        bioLines.push(l);
+      }
+      cachedData.profileText = bioLines.join('\n').trim();
     }
 
     const knownKeys = [
@@ -360,11 +388,13 @@
       '同居人', '飼っているペット', 'ペット', '休日', 'タバコ', 'お酒', '好きなこと・趣味', '趣味'
     ];
 
+    const sectionHeaders = ['基本情報', '学歴・職種・外見', '恋愛・結婚について', '性格・趣味・生活', 'プロフィール', '自己紹介'];
+
     for (let i = 0; i < lines.length - 1; i++) {
       const line = lines[i];
       if (knownKeys.includes(line)) {
         const nextLine = lines[i + 1];
-        if (nextLine && !knownKeys.includes(nextLine) && !['基本情報', '学歴・職種・外見', '恋愛・結婚について', '性格・趣味・生活', 'プロフィール', '自己紹介'].includes(nextLine)) {
+        if (nextLine && !knownKeys.includes(nextLine) && !sectionHeaders.includes(nextLine)) {
           cachedData.details[line] = nextLine;
           if (line === 'ニックネーム' && nextLine) cachedData.name = nextLine;
           if (line === '年齢' && nextLine) cachedData.age = nextLine;
@@ -516,7 +546,7 @@
       : '⚠️ 未取得';
 
     const previewLines = [
-      `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})`,
+      `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})${d.likes ? ` [${d.likes}]` : ''}`,
       d.question ? `❓ クエスチョン: ${d.question}` : null,
       `📋 スペック: ${specSummary}`,
       `🏷️ マイタグ: ${tagStatus}`,
@@ -620,8 +650,9 @@
     const specLines = Object.entries(d.details).map(([k, v]) => `- **${k}**: ${v}`).join('\n') || '- （スペック未取得）';
 
     const md = `# お相手: ${d.name} (${d.age || '不明'} / ${d.location || '不明'})
-- **ひとこと/クエスチョン**: ${d.question ? `「${d.question}」` : (d.tweet || 'なし')}
-- **マイタグ**: ${d.tags.slice(0, 8).join(', ') || 'なし'}
+- **ログイン/いいね**: ${d.loginStatus || '不明'} / ${d.likes || '不明'}
+- **ペアーズクエスチョン**: ${d.question || 'なし'}
+- **マイタグ**: ${d.tags.join(', ') || 'なし'}
 - **状態**: ${d.isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : '💬 やり取り中'}
 
 ## 基本スペック
@@ -636,7 +667,7 @@ ${d.profileText || '（自己紹介文未取得）'}
 ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （初回メッセージ・会話履歴なし）'}
 `;
     navigator.clipboard.writeText(md).then(() => {
-      showToast('📋 相談用Markdown（差分）をコピーしました');
+      showToast('📋 相談用Markdown（全項目）をコピーしました');
     });
   });
 
