@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.1.0
+// @version      1.2.0
 // @description  Pairs(Web版)のプロフィール詳細（自己紹介文・つぶやき・スペック）と会話履歴から相手別フォルダ自動作成・初回はじめましてメッセージ判定・返信文案自動挿入
 // @author       i
 // @match        https://pairs.lv/*
@@ -16,9 +16,8 @@
   'use strict';
   if (document.getElementById('pairs-copilot-root')) return;
 
-  const SERVER_URL = 'http://127.0.0.1:3214';
+  const SERVER_URLS = ['http://127.0.0.1:3000', 'http://127.0.0.1:3214'];
 
-  // スタイル注入
   const style = document.createElement('style');
   style.textContent = `
     #pairs-copilot-root {
@@ -82,7 +81,7 @@
       font-size: 12px;
     }
     .copilot-preview {
-      max-height: 120px;
+      max-height: 140px;
       overflow-y: auto;
       background: #fff;
       padding: 8px;
@@ -102,17 +101,9 @@
       font-weight: bold;
       font-size: 12px;
     }
-    .copilot-badge {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: normal;
-    }
   `;
   document.head.appendChild(style);
 
-  // ルートDOM作成
   const root = document.createElement('div');
   root.id = 'pairs-copilot-root';
   root.innerHTML = `
@@ -126,7 +117,7 @@
         <div class="copilot-card">
           <div style="font-weight:bold;display:flex;justify-content:space-between;align-items:center;">
             <span>👤 相手プロフィール & 会話</span>
-            <button id="copilot-sync" style="border:none;background:none;color:#2563eb;font-size:11px;cursor:pointer;font-weight:bold;">📂 ローカル同期</button>
+            <button id="copilot-rescan" style="border:none;background:none;color:#2563eb;font-size:11px;cursor:pointer;font-weight:bold;">🔄 再取得</button>
           </div>
           <div class="copilot-preview" id="copilot-preview-text">取得中...</div>
           <div id="copilot-status-text" style="font-size:11px;margin-top:4px;color:#64748b;"></div>
@@ -142,9 +133,9 @@
   const trigger = document.getElementById('pairs-copilot-trigger');
   const panel = document.getElementById('pairs-copilot-panel');
   const closeBtn = document.getElementById('copilot-close');
+  const rescanBtn = document.getElementById('copilot-rescan');
   const preview = document.getElementById('copilot-preview-text');
   const copyMdBtn = document.getElementById('copilot-copy-md');
-  const syncBtn = document.getElementById('copilot-sync');
   const statusText = document.getElementById('copilot-status-text');
   const toast = document.getElementById('copilot-user-toast');
 
@@ -166,10 +157,17 @@
     }
   });
   closeBtn.addEventListener('click', () => panel.classList.remove('open'));
-  syncBtn.addEventListener('click', () => { extract(); sync(true); });
+  rescanBtn.addEventListener('click', () => { extract(); sync(true); });
 
   function extract() {
     try {
+      document.querySelectorAll('button, a, span[role="button"], div[role="button"]').forEach(btn => {
+        const text = btn.innerText?.trim();
+        if (text && (text === 'もっと見る' || text === '続きを読む' || text === 'すべて見る')) {
+          try { btn.click(); } catch(e){}
+        }
+      });
+
       let name = 'お相手';
       let userId = '';
       let profile = '';
@@ -180,7 +178,6 @@
       let tags = [];
       let msgs = [];
 
-      // 1. URLからuserId抽出
       const hash = window.location.hash || '';
       const path = window.location.pathname || '';
       const idMatch = hash.match(/\/(?:chat|user|matching|profile)\/([a-zA-Z0-9_-]+)/) || 
@@ -188,46 +185,51 @@
                       window.location.href.match(/[?&]user_id=([a-zA-Z0-9_-]+)/);
       if (idMatch) userId = idMatch[1];
 
-      // 2. 相手名
       const h = document.querySelector('[class*="chatHeader"], [class*="Header"], [class*="partner-name"], [class*="userName"], [class*="nickname"], [data-testid*="user-name"]');
       if (h) {
         const raw = h.textContent.trim().split('\n')[0].replace(/さん$/, '').trim();
-        if (raw && !raw.includes('Pairs') && !raw.includes('メッセージ')) name = raw;
+        if (raw && !raw.includes('Pairs') && !raw.includes('メッセージ') && raw.length < 20) name = raw;
       }
 
-      // 3. プロフィール領域
-      const profileRoots = document.querySelectorAll('[class*="profile"], [class*="Profile"], [class*="sidebar"], [class*="Sidebar"], [class*="user-info"], [class*="detail"], [class*="modal"], [role="dialog"], aside, main');
+      // 自己紹介文スコアリング
+      const excludeKeywords = ['規約', '通報', '違反報告', 'ブロック', 'いいね', 'スキップ', 'オンライン', '本人確認済', 'メッセージを入力', '写真を送信'];
+      const bioIntroKeywords = ['はじめまして', 'よろしくお願いします', '見ていただき', '休日は', '仕事は', '趣味は', '都内在住', 'カフェ', '映画', 'アニメ', '旅行', '音楽'];
 
-      // つぶやき
-      const tweetElem = document.querySelector('[class*="tweet"], [class*="Tweet"], [class*="catchphrase"], [class*="Catchphrase"], [class*="status-message"], [class*="oneWord"], [data-testid*="tweet"]');
+      const candidateElements = document.querySelectorAll('p, div, section, article, [dir="auto"]');
+      let bestBioText = '';
+      let bestBioScore = -1;
+
+      candidateElements.forEach(el => {
+        if (el.children.length > 5) return;
+        const text = (el.innerText || el.textContent || '').trim();
+        if (!text || text.length < 25 || text.length > 3000) return;
+        if (excludeKeywords.some(kw => text.includes(kw))) return;
+
+        let score = 0;
+        if (text.length >= 40) score += 20;
+        if (text.length >= 80) score += 30;
+        if (text.includes('\n')) score += 15;
+        bioIntroKeywords.forEach(kw => { if (text.includes(kw)) score += 15; });
+        if ((el.className || '').toString().match(/intro|bio|profile|about|text|detail/i)) score += 25;
+
+        if (score > bestBioScore) {
+          bestBioScore = score;
+          bestBioText = text;
+        }
+      });
+      profile = bestBioText;
+
+      const tweetElem = document.querySelector('[class*="tweet"], [class*="Tweet"], [class*="catchphrase"], [class*="oneWord"], [data-testid*="tweet"]');
       if (tweetElem) tweet = tweetElem.textContent.trim().replace(/^["「『]|["」』]$/g, '');
 
-      // 自己紹介文
-      const introElem = document.querySelector('[class*="introduction"], [class*="Introduction"], [class*="bio"], [class*="Bio"], [class*="selfIntroduction"], [class*="profile-text"], [data-testid*="introduction"]');
-      if (introElem) {
-        profile = introElem.innerText.trim();
-      } else {
-        for (const pRoot of profileRoots) {
-          const paragraphs = pRoot.querySelectorAll('p, div, section');
-          for (const p of paragraphs) {
-            const t = p.innerText.trim();
-            if (t.length > 40 && !t.includes('規約') && !t.includes('通報') && !t.includes('ブロック') && !t.includes('いいね')) {
-              if (t.length > profile.length) profile = t;
-            }
-          }
-        }
-      }
-
-      // 年齢・居住地
-      const allText = Array.from(profileRoots).map(r => r.innerText).join('\n');
-      const ageMatch = allText.match(/(\d{2}歳)/) || document.body.innerText.match(/(\d{2}歳)/);
+      const fullBodyText = document.body.innerText;
+      const ageMatch = fullBodyText.match(/(\d{2}歳)/);
       if (ageMatch) age = ageMatch[1];
-      const locMatch = allText.match(/(東京|神奈川|埼玉|千葉|大阪|愛知|福岡|北海道|京都|兵庫|宮城|広島|[^\s\n\(\)]+[都道府県])/);
+      const locMatch = fullBodyText.match(/(東京|神奈川|埼玉|千葉|大阪|愛知|福岡|北海道|京都|兵庫|宮城|広島|[^\s\n\(\)0-9]{2,3}[都道府県])/);
       if (locMatch) location = locMatch[1];
 
-      // スペック
       document.querySelectorAll('dl, tr, [class*="item"], [class*="row"]').forEach(row => {
-        const lines = row.innerText.trim().split(/[\n\t:]+/).map(s => s.trim()).filter(Boolean);
+        const lines = (row.innerText || '').trim().split(/[\n\t:]+/).map(s => s.trim()).filter(Boolean);
         if (lines.length >= 2) {
           const k = lines[0];
           const v = lines.slice(1).join(' ');
@@ -237,23 +239,19 @@
         }
       });
 
-      // タグ
       document.querySelectorAll('[class*="mytag"], [class*="tag"], [class*="community"], [class*="badge"]').forEach(n => {
-        const t = n.innerText.trim().replace(/^#/, '');
+        const t = (n.innerText || '').trim().replace(/^#/, '');
         if (t && t.length < 25 && !t.match(/^(写真|サブ写真|本人確認|オンライン|ログイン|いいね|スキップ|メッセージ)$/)) {
           tags.push(t);
         }
       });
 
-      // 会話履歴
       document.querySelectorAll('[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"]').forEach(n => {
-        const t = n.innerText.trim();
+        const t = (n.innerText || '').trim();
         if (t && t.length < 500) {
-          const isMine = n.className.includes('mine') || n.className.includes('self') || n.className.includes('right');
+          const isMine = n.className?.includes('mine') || n.className?.includes('self') || n.className?.includes('right');
           const cleanText = t.replace(/^(既読|未読|\d{1,2}:\d{2})\s*/, '').trim();
-          if (cleanText) {
-            msgs.push(`${isMine ? '自分' : name}: ${cleanText}`);
-          }
+          if (cleanText) msgs.push(`${isMine ? '自分' : name}: ${cleanText}`);
         }
       });
 
@@ -272,7 +270,7 @@
         location,
         tweet,
         details,
-        profileText: profile.slice(0, 2000),
+        profileText: profile.slice(0, 2500),
         tags: [...new Set(tags)],
         messages: msgs,
         isFirstMessage,
@@ -280,7 +278,9 @@
       };
 
       const specStr = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}:${v}`).join(' / ');
-      preview.textContent = `【お相手】: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `【つぶやき】: "${tweet}"\n` : ''}${specStr ? `【スペック】: ${specStr}\n` : ''}【タグ】: ${cached.tags.slice(0, 4).join(', ') || 'なし'}\n【自己紹介】: ${profile ? profile.slice(0, 60) + '...' : '（未取得）'}\n【フェーズ】: ${isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : `💬 やり取り中 (${msgs.length}件)`}`;
+      const bioStatus = profile ? `✅ ${profile.slice(0, 60)}...` : '⚠️ 未取得（右パネルを開いて「🔄 再取得」）';
+
+      preview.textContent = `👤 【お相手】: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `💬 【ひとこと】: "${tweet}"\n` : ''}${specStr ? `📋 【スペック】: ${specStr}\n` : ''}🏷️ 【タグ】: ${cached.tags.slice(0, 4).join(', ') || 'なし'}\n📝 【自己紹介文】:\n${bioStatus}\n【フェーズ】: ${isFirstMessage ? '🐣 初回メッセージ' : `💬 やり取り中 (${msgs.length}件)`}`;
     } catch (e) {
       preview.textContent = '取得エラー';
     }
@@ -289,24 +289,34 @@
   function sync(manual = false) {
     if (!cached) return;
     statusText.textContent = '🔄 同期中...';
-    GM_xmlhttpRequest({
-      method: 'POST',
-      url: `${SERVER_URL}/api/sync`,
-      headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify(cached),
-      onload: function(res) {
-        try {
-          const json = JSON.parse(res.responseText);
-          statusText.innerHTML = `✅ 保存済: <code>${json.folderName}</code>`;
-          if (manual) showToast(`📂 保存完了: ${json.folderName}`);
-        } catch (e) {
-          statusText.textContent = '⚠️ 応答パースエラー';
-        }
-      },
-      onerror: function() {
-        statusText.textContent = '⚠️ サーバー (3214) 停止中';
+
+    function trySync(urlIndex = 0) {
+      if (urlIndex >= SERVER_URLS.length) {
+        statusText.textContent = '';
+        return;
       }
-    });
+      const sUrl = SERVER_URLS[urlIndex];
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${sUrl}/api/dating/sync`,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify(cached),
+        onload: function(res) {
+          try {
+            const json = JSON.parse(res.responseText);
+            statusText.innerHTML = `✅ 保存済: <code>${json.folderName}</code>`;
+            if (manual) showToast(`📂 保存完了: ${json.folderName}`);
+          } catch (e) {
+            trySync(urlIndex + 1);
+          }
+        },
+        onerror: function() {
+          trySync(urlIndex + 1);
+        }
+      });
+    }
+
+    trySync(0);
   }
 
   copyMdBtn.addEventListener('click', () => {
@@ -318,7 +328,7 @@
 
     const md = `# お相手情報: ${d.name} (${d.userId})
 - **年齢・居住地**: ${d.age || '不明'} / ${d.location || '不明'}
-- **つぶやき**: ${d.tweet ? `「${d.tweet}」` : 'なし'}
+- **ひとこと**: ${d.tweet ? `「${d.tweet}」` : 'なし'}
 - **URL**: ${d.rawUrl}
 - **マイタグ**: ${d.tags.join(', ') || 'なし'}
 - **フェーズ**: ${d.isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : '💬 やり取り中'}
@@ -335,51 +345,10 @@ ${d.profileText || '（自己紹介文未取得）'}
 ${d.messages.length > 0 ? d.messages.map(m => `- ${m}`).join('\n') : '- （会話履歴なし・初回メッセージ）'}
 `;
     navigator.clipboard.writeText(md).then(() => {
-      showToast('📋 Markdownをコピーしました。Antigravityに貼り付けてください。');
+      showToast('📋 Markdownをコピーしました');
     });
   });
 
-  function insertToInput(text) {
-    const input = document.querySelector('textarea, [contenteditable="true"], [class*="messageInput"], [class*="ChatInput"], input[type="text"]');
-    if (input) {
-      if (input.tagName.toLowerCase() === 'textarea' || input.tagName.toLowerCase() === 'input') {
-        input.value = text;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.focus();
-      } else if (input.isContentEditable) {
-        input.innerText = text;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.focus();
-      }
-      showToast('✨ Antigravityの文案を入力欄にセットしました！', 4000);
-    }
-  }
-
-  // ドラフト自動監視
-  setInterval(() => {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: `${SERVER_URL}/api/draft`,
-      onload: function(res) {
-        try {
-          const draft = JSON.parse(res.responseText);
-          if (draft && draft.text && !draft.consumed && draft.id !== lastDraftId) {
-            lastDraftId = draft.id;
-            insertToInput(draft.text);
-            GM_xmlhttpRequest({
-              method: 'POST',
-              url: `${SERVER_URL}/api/draft/consume`,
-              headers: { 'Content-Type': 'application/json' },
-              data: JSON.stringify({ id: draft.id })
-            });
-          }
-        } catch (e) {}
-      }
-    });
-  }, 1500);
-
-  setTimeout(() => { extract(); sync(); }, 1500);
-  window.addEventListener('hashchange', () => { setTimeout(() => { extract(); sync(); }, 1000); });
+  setTimeout(() => { extract(); sync(); }, 1200);
+  window.addEventListener('hashchange', () => { setTimeout(() => { extract(); sync(); }, 800); });
 })();
