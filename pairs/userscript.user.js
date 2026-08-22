@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.2.0
+// @version      3.3.0
 // @description  Pairs(Web版)コパイロット（👤プロフ取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -117,7 +117,7 @@
 
           <!-- アクションボタン（プロフ取得 / 再取得） -->
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:8px;">
-            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（自己紹介・クエスチョン・タグ・スペック）を全自動取得">
+            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（クエスチョン・タグコメント・年収・スペック）を全自動取得">
               👤 プロフ取得
             </button>
             <button id="copilot-fetch-chat-btn" style="background:#f8fafc; color:#334155; border:1px solid #cbd5e1; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="最新のチャット履歴を再取得して差分を防止">
@@ -125,8 +125,8 @@
             </button>
           </div>
 
-          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 180px; overflow-y: auto; background: #fff; padding: 8px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid #e2e8f0;">お相手の画面で「👤 プロフ取得」を押してください</div>
-          <button id="copilot-paste-btn" style="width:100%; margin-top:6px; background:#f1f5f9; border:1px dashed #cbd5e1; padding:4px; font-size:11px; color:#475569; border-radius:4px; cursor:pointer;">📋 コピーしたテキストを直接貼り付けて解析</button>
+          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 220px; overflow-y: auto; background: #fff; padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; border: 1px solid #e2e8f0;">お相手の画面で「👤 プロフ取得」を押してください</div>
+          <button id="copilot-paste-btn" style="width:100%; margin-top:6px; background:#f1f5f9; border:1px dashed #cbd5e1; padding:5px; font-size:11px; color:#475569; border-radius:4px; cursor:pointer;">📋 コピーしたテキストを直接貼り付けて解析</button>
         </div>
 
         <div>
@@ -137,7 +137,7 @@
             <button class="copilot-preset-btn" data-preset="deep_dive">🔍 趣味の深掘り</button>
             <button class="copilot-preset-btn" data-preset="date_invite">☕ デート打診</button>
           </div>
-          <textarea id="copilot-custom-instruction" class="copilot-textarea" placeholder="追加の要望があれば入力（例: カフェの話題に触れる、など）"></textarea>
+          <textarea id="copilot-custom-instruction" class="copilot-textarea" placeholder="追加の要望があれば入力（例: マイタグの連絡頻度について触れる、など）"></textarea>
         </div>
 
         <div>
@@ -187,6 +187,7 @@
     profileText: '',
     tags: [],
     question: '',
+    questions: [],
     messages: [],
     isFirstMessage: true,
     rawUrl: window.location.href
@@ -259,7 +260,7 @@
       autoSyncToLocal();
       fetchProfileBtn.textContent = '👤 プロフ取得';
       fetchProfileBtn.disabled = false;
-      showToast('✅ プロフィールを全項目解析・保存しました！');
+      showToast('✅ クエスチョン・マイタグコメント・全スペックを保存しました！');
     }, 150);
   });
 
@@ -286,7 +287,7 @@
         extractChatMessages();
         updatePreview();
         autoSyncToLocal();
-        showToast('✅ 貼り付けたテキストから全項目解析・保存しました！');
+        showToast('✅ 貼り付けテキストから全項目（コメント・スペック含む）を保存しました！');
       } else {
         const input = prompt('プロフィールのテキストをここに貼り付けてください:');
         if (input && input.trim()) {
@@ -339,14 +340,11 @@
       for (let i = qIdx + 1; i < lines.length; i++) {
         const l = lines[i];
         if (l.startsWith('マイタグ') || l.startsWith('自己紹介') || l.startsWith('プロフィール')) break;
-        if (l !== '許容感覚' && l !== '共通点') {
-          qItems.push(l);
-        }
+        qItems.push(l);
       }
-      if (qItems.length >= 2) {
-        cachedData.question = `Q: ${qItems[0]} ➔ A: ${qItems[1]}`;
-      } else if (qItems.length === 1) {
-        cachedData.question = qItems[0];
+      if (qItems.length > 0) {
+        cachedData.questions = qItems;
+        cachedData.question = qItems.join(' / ');
       }
     }
 
@@ -362,7 +360,9 @@
         const mdMatch = l.match(/\[(.*?)\]/);
         if (mdMatch) cleanTag = mdMatch[1];
         
-        cleanTag = cleanTag.replace(/心と身体|美容・健康|恋愛・結婚|生活|趣味|仕事$/, '').trim();
+        cleanTag = cleanTag.replace(/(心と身体|美容・健康|恋愛・結婚|生活|趣味|仕事|その他)$/, '').trim();
+        if (!cleanTag) cleanTag = l.replace(/\[(.*?)\]/, '$1').trim();
+        
         if (cleanTag && cleanTag.length >= 2) {
           tags.push(cleanTag);
         }
@@ -385,7 +385,8 @@
       'ニックネーム', '年齢', '血液型', '兄弟姉妹', '話せる言語', '居住地', '出身地',
       '学歴', '職種', '年収', '身長', '体型', '結婚歴', '子供の有無', '結婚に対する意思',
       '出会うまでの希望', 'デート費用', '初回デート費用', '性格・タイプ', '性格', '社交性',
-      '同居人', '飼っているペット', 'ペット', '休日', 'タバコ', 'お酒', '好きなこと・趣味', '趣味'
+      '同居人', '飼っているペット', 'ペット', '休日', 'タバコ', 'お酒', '好きなこと・趣味', '趣味',
+      '職業', '勤務地', 'チャームポイント'
     ];
 
     const sectionHeaders = ['基本情報', '学歴・職種・外見', '恋愛・結婚について', '性格・趣味・生活', 'プロフィール', '自己紹介'];
@@ -426,6 +427,9 @@
             const v = dds[i].innerText.trim();
             if (k && v && k.length <= 15) {
               cachedData.details[k] = v;
+              if (k === 'ニックネーム') cachedData.name = v;
+              if (k === '年齢') cachedData.age = v;
+              if (k === '居住地') cachedData.location = v;
             }
           }
         }
@@ -437,7 +441,8 @@
           if (el.closest('#pairs-copilot-root')) return;
           const txt = (el.innerText || el.textContent || '').trim().replace(/^#/, '');
           if (txt && txt.length >= 3 && !txt.includes('すべて見る') && !txt.match(/^(写真|本人確認|オンライン|ログイン|メッセージ|VIP)$/)) {
-            domTags.push(txt.split('\n')[0].trim());
+            const clean = txt.replace(/\n/g, ' ').replace(/(心と身体|美容・健康|恋愛・結婚|生活|趣味|仕事|その他)$/, '').trim();
+            if (clean) domTags.push(clean);
           }
         });
         if (domTags.length > 0) {
@@ -519,41 +524,34 @@
   function updatePreview() {
     const d = cachedData;
     
-    const specItems = [];
-    if (d.details['身長']) specItems.push(`身長: ${d.details['身長']}`);
-    if (d.details['体型']) specItems.push(`体型: ${d.details['体型']}`);
-    if (d.details['職種'] || d.details['仕事']) specItems.push(`職種: ${d.details['職種'] || d.details['仕事']}`);
-    if (d.details['学歴']) specItems.push(`学歴: ${d.details['学歴']}`);
-    if (d.details['休日']) specItems.push(`休日: ${d.details['休日']}`);
-    if (d.details['血液型']) specItems.push(`血液型: ${d.details['血液型']}`);
-    if (d.details['同居人']) specItems.push(`同居: ${d.details['同居人']}`);
-    if (d.details['タバコ']) specItems.push(`タバコ: ${d.details['タバコ']}`);
+    const allSpecLines = Object.entries(d.details)
+      .map(([k, v]) => `  • ${k}: ${v}`)
+      .join('\n');
 
-    for (const [k, v] of Object.entries(d.details)) {
-      if (!['身長', '体型', '職種', '仕事', '学歴', '休日', '血液型', '同居人', 'タバコ', 'ニックネーム', '年齢', '居住地'].includes(k)) {
-        if (specItems.length < 8) specItems.push(`${k}: ${v}`);
-      }
-    }
-
-    const specSummary = specItems.length > 0 ? specItems.join(' | ') : '未取得';
+    const specSummary = allSpecLines || '  （未取得）';
 
     const bioStatus = d.profileText 
-      ? `✅ 取得完了:\n${d.profileText.slice(0, 110)}${d.profileText.length > 110 ? '...' : ''}` 
+      ? `✅ 取得完了:\n${d.profileText.slice(0, 150)}${d.profileText.length > 150 ? '...' : ''}` 
       : '⚠️ 未取得';
 
     const tagStatus = d.tags.length > 0 
-      ? `✅ ${d.tags.slice(0, 4).join(', ')}${d.tags.length > 4 ? ` 他${d.tags.length - 4}件` : ''}` 
-      : '⚠️ 未取得';
+      ? d.tags.map((t, idx) => `  ${idx + 1}. ${t}`).join('\n')
+      : '  ⚠️ 未取得';
+
+    const questionLines = d.questions && d.questions.length > 0
+      ? d.questions.map(q => `  • ${q}`).join('\n')
+      : (d.question ? `  • ${d.question}` : '  （未取得）');
 
     const previewLines = [
       `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})${d.likes ? ` [${d.likes}]` : ''}`,
-      d.question ? `❓ クエスチョン: ${d.question}` : null,
-      `📋 スペック: ${specSummary}`,
-      `🏷️ マイタグ: ${tagStatus}`,
+      d.loginStatus ? `🕒 ログイン: ${d.loginStatus}` : null,
+      `❓ ペアーズクエスチョン:\n${questionLines}`,
+      `🏷️ マイタグ（コメント含む ${d.tags.length}件）:\n${tagStatus}`,
+      `📋 基本スペック (${Object.keys(d.details).length}項目):\n${specSummary}`,
       `📝 自己紹介文:\n${bioStatus}`
     ].filter(Boolean);
 
-    previewBox.textContent = previewLines.join('\n');
+    previewBox.textContent = previewLines.join('\n\n');
   }
 
   async function autoSyncToLocal() {
@@ -648,14 +646,20 @@
     const d = cachedData;
     const diffMessages = d.messages.slice(-4);
     const specLines = Object.entries(d.details).map(([k, v]) => `- **${k}**: ${v}`).join('\n') || '- （スペック未取得）';
+    const tagLines = d.tags.map(t => `- ${t}`).join('\n') || '- （マイタグなし）';
+    const qLines = d.questions && d.questions.length > 0 ? d.questions.map(q => `- ${q}`).join('\n') : `- ${d.question || 'なし'}`;
 
     const md = `# お相手: ${d.name} (${d.age || '不明'} / ${d.location || '不明'})
 - **ログイン/いいね**: ${d.loginStatus || '不明'} / ${d.likes || '不明'}
-- **ペアーズクエスチョン**: ${d.question || 'なし'}
-- **マイタグ**: ${d.tags.join(', ') || 'なし'}
 - **状態**: ${d.isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : '💬 やり取り中'}
 
-## 基本スペック
+## ペアーズクエスチョン
+${qLines}
+
+## マイタグ（コメント含む）
+${tagLines}
+
+## 基本スペック（全項目）
 ${specLines}
 
 ## 自己紹介文
