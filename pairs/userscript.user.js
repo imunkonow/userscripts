@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.9.0
-// @description  Pairs(Web版)の全自動コパイロット（画面開く → 情報取得 → 文章生成ボタン押下 → ローカルAI連携入力完了 → 手動送信）
+// @version      2.0.0
+// @description  Pairs(Web版)の全自動コパイロット（画面開く → プロフィール自動展開 → 文章生成ボタン押下 → ローカルAI連携入力完了 → 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
 // @updateURL    https://raw.githubusercontent.com/pithud/userscripts/main/pairs/userscript.user.js
@@ -217,15 +217,28 @@
     btn.addEventListener('click', () => setPreset(btn.getAttribute('data-preset')));
   });
 
+  function triggerAutoOpen() {
+    try {
+      const partnerLink = document.querySelector(
+        '[data-test="header-title"] a, header a[href*="/partner/"], [class*="handleClickInvitationAssistance"], [class*="chatHeader"] a, header [class*="previousSrcset"]'
+      );
+      if (partnerLink) partnerLink.click();
+    } catch(e){}
+  }
+
   trigger.addEventListener('click', () => {
     panel.classList.toggle('open');
     if (panel.classList.contains('open')) {
+      triggerAutoOpen();
       extract();
       sync();
     }
   });
   closeBtn.addEventListener('click', () => panel.classList.remove('open'));
-  rescanBtn.addEventListener('click', () => { extract(); sync(true); });
+  rescanBtn.addEventListener('click', () => { 
+    triggerAutoOpen(); 
+    setTimeout(() => { extract(); sync(true); }, 600);
+  });
 
   // -------------------------------------------------------------
   // 自己紹介文・タグのピンポイント抽出
@@ -251,15 +264,26 @@
 
       const hash = window.location.hash || '';
       const path = window.location.pathname || '';
-      const idMatch = hash.match(/\/(?:chat|user|matching|profile)\/([a-zA-Z0-9_-]+)/) || 
-                      path.match(/\/(?:chat|user|matching|profile)\/([a-zA-Z0-9_-]+)/) ||
+      const idMatch = hash.match(/\/(?:chat|user|matching|profile|detail|partner)\/([a-zA-Z0-9_-]+)/) || 
+                      path.match(/\/(?:chat|user|matching|profile|detail|partner)\/([a-zA-Z0-9_-]+)/) ||
                       window.location.href.match(/[?&]user_id=([a-zA-Z0-9_-]+)/);
       if (idMatch) userId = idMatch[1];
 
-      const h = document.querySelector('[class*="chatHeader"], [class*="Header"], [class*="partner-name"], [class*="userName"], [class*="nickname"], [data-testid*="user-name"]');
-      if (h) {
-        const raw = h.textContent.trim().split('\n')[0].replace(/さん$/, '').trim();
-        if (raw && !raw.includes('Pairs') && !raw.includes('メッセージ') && raw.length < 20) name = raw;
+      // 相手名（ヘッダーのニックネーム要素）
+      const headerTitle = document.querySelector('[data-test="header-title"], [class*="chatHeader"], header h1');
+      if (headerTitle) {
+        const nameSpans = headerTitle.querySelectorAll('span');
+        for (let i = nameSpans.length - 1; i >= 0; i--) {
+          const t = nameSpans[i].textContent.trim();
+          if (t && t.length < 20 && !t.includes('Pairs') && !t.includes('メッセージ')) {
+            name = t;
+            break;
+          }
+        }
+        if (name === 'お相手') {
+          const raw = headerTitle.textContent.trim().split('\n')[0].replace(/さん$/, '').trim();
+          if (raw && raw.length < 20) name = raw;
+        }
       }
 
       // チャット領域除外
@@ -389,7 +413,7 @@
       };
 
       const specStr = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}:${v}`).join(' / ');
-      const bioStatus = profile ? `✅ 取得完了:\n${profile.slice(0, 90)}...` : '⚠️ 未取得（右パネルを開いて「🔄 再取得」）';
+      const bioStatus = profile ? `✅ 取得完了:\n${profile.slice(0, 120)}...` : '⚠️ プロフィール未展開（上部アイコンをクリックまたは「🔄 再取得」）';
       const tagStatus = cached.tags.length > 0 ? `✅ ${cached.tags.slice(0, 5).join(', ')}` : '⚠️ タグ未検出';
 
       preview.textContent = `👤 お相手: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `💬 ひとこと: "${tweet}"\n` : ''}${specStr ? `📋 スペック: ${specStr}\n` : ''}🏷️ タグ: ${tagStatus}\n📝 自己紹介文:\n${bioStatus}`;
@@ -529,11 +553,18 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
   });
 
   panel.classList.add('open');
-  setTimeout(() => { extract(); sync(); }, 1000);
-  setTimeout(() => { extract(); }, 2500);
+
+  // 初期ロード時・ハッシュ変化時にプロフィール自動展開
+  setTimeout(() => { 
+    triggerAutoOpen(); 
+    setTimeout(() => { extract(); sync(); }, 600);
+  }, 1000);
+
   window.addEventListener('hashchange', () => { 
     panel.classList.add('open');
-    setTimeout(() => { extract(); sync(); }, 600); 
-    setTimeout(() => { extract(); }, 2000); 
+    setTimeout(() => { 
+      triggerAutoOpen(); 
+      setTimeout(() => { extract(); sync(); }, 600);
+    }, 500); 
   });
 })();
