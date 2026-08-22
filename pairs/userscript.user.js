@@ -548,18 +548,16 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
 
   panel.classList.add('open');
 
-  setTimeout(() => { 
-    extractChatMessages(); 
-    updatePreview();
-    autoSyncToLocal(); 
-  }, 800);
+  // 初期ロード時・URL変更時は自動取得せず待機（ユーザーのボタン押下時のみ始動）
+  modeBadge.textContent = '待機中';
+  modeBadge.style.background = '#f1f5f9';
+  modeBadge.style.color = '#64748b';
 
   window.addEventListener('hashchange', () => { 
     panel.classList.add('open');
-    setTimeout(() => { 
-      extractChatMessages(); 
-      updatePreview();
-      autoSyncToLocal(); 
-    }, 500); 
+    previewBox.textContent = 'お相手を切り替えました。「👤 プロフ取得」または「🔄 履歴再取得」を押してください。';
+    modeBadge.textContent = '待機中';
+    modeBadge.style.background = '#f1f5f9';
+    modeBadge.style.color = '#64748b';
   });
 })();
