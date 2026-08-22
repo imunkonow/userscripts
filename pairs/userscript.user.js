@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.3.0
-// @description  Pairs(Web版)コパイロット（👤プロフ取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
+// @version      3.4.0
+// @description  Pairs(Web版)コパイロット（👤プロフ取得(プロフ画面) / 🔄履歴再取得 ➔ 🚀文章生成 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
 // @updateURL    https://raw.githubusercontent.com/pithud/userscripts/main/pairs/userscript.user.js
@@ -117,15 +117,15 @@
 
           <!-- アクションボタン（プロフ取得 / 再取得） -->
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:8px;">
-            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（クエスチョン・タグコメント・年収・スペック）を全自動取得">
-              👤 プロフ取得
+            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="プロフ画面で押すと、ペアーズクエスチョン・マイタグ・年収・全スペックを自動解析">
+              👤 プロフ取得(プロフ画面)
             </button>
             <button id="copilot-fetch-chat-btn" style="background:#f8fafc; color:#334155; border:1px solid #cbd5e1; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="最新のチャット履歴を再取得して差分を防止">
               🔄 履歴再取得
             </button>
           </div>
 
-          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 220px; overflow-y: auto; background: #fff; padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; border: 1px solid #e2e8f0;">お相手の画面で「👤 プロフ取得」を押してください</div>
+          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 220px; overflow-y: auto; background: #fff; padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; border: 1px solid #e2e8f0;">お相手のプロフィール画面で「👤 プロフ取得(プロフ画面)」を押してください</div>
           <button id="copilot-paste-btn" style="width:100%; margin-top:6px; background:#f1f5f9; border:1px dashed #cbd5e1; padding:5px; font-size:11px; color:#475569; border-radius:4px; cursor:pointer;">📋 コピーしたテキストを直接貼り付けて解析</button>
         </div>
 
@@ -137,12 +137,12 @@
             <button class="copilot-preset-btn" data-preset="deep_dive">🔍 趣味の深掘り</button>
             <button class="copilot-preset-btn" data-preset="date_invite">☕ デート打診</button>
           </div>
-          <textarea id="copilot-custom-instruction" class="copilot-textarea" placeholder="追加の要望があれば入力（例: マイタグの連絡頻度について触れる、など）"></textarea>
+          <textarea id="copilot-custom-instruction" class="copilot-textarea" placeholder="追加の要望があれば入力（例: 連絡頻度について触れる、など）"></textarea>
         </div>
 
         <div>
           <button id="copilot-start-ai-btn" style="width:100%; background: linear-gradient(135deg, #2563eb, #1d4ed8); padding: 12px; font-size: 14px; font-weight: bold; border-radius: 8px; color: #fff; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(37,99,235,0.3);">
-            🚀 文章生成（入力完了）
+            🚀 文章生成
           </button>
         </div>
 
@@ -240,7 +240,7 @@
     }
   }
 
-  // 1. プロフ取得
+  // 1. プロフ取得(プロフ画面)
   fetchProfileBtn.addEventListener('click', () => {
     fetchProfileBtn.textContent = '⏳ 解析中...';
     fetchProfileBtn.disabled = true;
@@ -258,9 +258,9 @@
       extractChatMessages();
       updatePreview();
       autoSyncToLocal();
-      fetchProfileBtn.textContent = '👤 プロフ取得';
+      fetchProfileBtn.textContent = '👤 プロフ取得(プロフ画面)';
       fetchProfileBtn.disabled = false;
-      showToast('✅ クエスチョン・マイタグコメント・全スペックを保存しました！');
+      showToast('✅ クエスチョン・マイタグ・全スペックを保存しました！');
     }, 150);
   });
 
@@ -287,7 +287,7 @@
         extractChatMessages();
         updatePreview();
         autoSyncToLocal();
-        showToast('✅ 貼り付けテキストから全項目（コメント・スペック含む）を保存しました！');
+        showToast('✅ 貼り付けテキストから全項目を保存しました！');
       } else {
         const input = prompt('プロフィールのテキストをここに貼り付けてください:');
         if (input && input.trim()) {
@@ -334,13 +334,15 @@
       }
     }
 
-    const qIdx = lines.findIndex(l => l.includes('ペアーズクエスチョン'));
+    const qIdx = lines.findIndex(l => l.includes('ペアーズクエスチョン') || l.includes('Pairsクエスチョン'));
     if (qIdx !== -1) {
       const qItems = [];
       for (let i = qIdx + 1; i < lines.length; i++) {
         const l = lines[i];
-        if (l.startsWith('マイタグ') || l.startsWith('自己紹介') || l.startsWith('プロフィール')) break;
-        qItems.push(l);
+        if (l.startsWith('マイタグ') || l.startsWith('自己紹介') || l.startsWith('プロフィール') || l === '基本情報') break;
+        if (!l.includes('ペアーズクエスチョン') && !l.includes('共通点')) {
+          qItems.push(l);
+        }
       }
       if (qItems.length > 0) {
         cachedData.questions = qItems;
@@ -353,7 +355,7 @@
       const tags = [];
       for (let i = tagIdx + 1; i < lines.length; i++) {
         const l = lines[i];
-        if (l.startsWith('自己紹介') || l.startsWith('プロフィール')) break;
+        if (l.startsWith('自己紹介') || l.startsWith('プロフィール') || l === '基本情報') break;
         if (l.includes('すべて見る')) continue;
         
         let cleanTag = l;
@@ -416,6 +418,41 @@
       }
 
       parseProfileTextContent(fullText);
+
+      // ペアーズクエスチョンのDOM直接抽出
+      let foundQuestions = [];
+      const promptBoards = document.querySelectorAll('[class*="PromptBoard"], [class*="prompt"], [class*="Question"], [class*="promptBoard"]');
+      promptBoards.forEach(pb => {
+        if (pb.closest('#pairs-copilot-root')) return;
+        const txt = pb.innerText?.trim() || '';
+        if (txt.includes('ペアーズクエスチョン') || txt.includes('許容感覚') || txt.length > 5) {
+          const lines = txt.split('\n').map(s => s.trim()).filter(Boolean);
+          const filtered = lines.filter(s => !s.includes('ペアーズクエスチョン') && !s.includes('共通点'));
+          if (filtered.length > 0) {
+            foundQuestions = [...foundQuestions, ...filtered];
+          }
+        }
+      });
+
+      document.querySelectorAll('h1, h2, h3, div, span').forEach(el => {
+        if (el.closest('#pairs-copilot-root')) return;
+        const txt = el.innerText?.trim() || '';
+        if (txt === 'ペアーズクエスチョン' || txt === 'Pairsクエスチョン') {
+          const parent = el.closest('div') || el.parentElement;
+          if (parent) {
+            const lines = parent.innerText.split('\n').map(s => s.trim()).filter(Boolean);
+            const filtered = lines.filter(s => !s.includes('ペアーズクエスチョン') && !s.includes('共通点'));
+            if (filtered.length > 0) {
+              foundQuestions = [...new Set([...foundQuestions, ...filtered])];
+            }
+          }
+        }
+      });
+
+      if (foundQuestions.length > 0) {
+        cachedData.questions = [...new Set([...(cachedData.questions || []), ...foundQuestions])];
+        cachedData.question = cachedData.questions.join(' / ');
+      }
 
       document.querySelectorAll('dl[class*="evaluatedRows"], dl').forEach(dl => {
         if (dl.closest('#pairs-copilot-root')) return;
@@ -625,7 +662,7 @@
       }
     } catch (e) {}
 
-    startAiBtn.textContent = '🚀 文章生成（入力完了）';
+    startAiBtn.textContent = '🚀 文章生成';
     startAiBtn.disabled = false;
 
     if (generatedText) {
@@ -683,7 +720,7 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
 
   window.addEventListener('hashchange', () => { 
     panel.classList.add('open');
-    previewBox.textContent = 'お相手を切り替えました。「👤 プロフ取得」を押してください。';
+    previewBox.textContent = 'お相手を切り替えました。「👤 プロフ取得(プロフ画面)」を押してください。';
     modeBadge.textContent = '待機中';
     modeBadge.style.background = '#f1f5f9';
     modeBadge.style.color = '#64748b';
