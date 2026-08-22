@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.3.0
-// @description  Pairs(Web版)のプロフィール詳細（自己紹介文・つぶやき・スペック）と会話履歴から相手別フォルダ自動作成・初回はじめましてメッセージ判定・返信文案自動挿入
+// @version      1.5.0
+// @description  Pairs(Web版)の全自動コパイロット（画面開く → 情報取得 → AI開始ボタン押下 → メッセージ入力完了 → 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
 // @updateURL    https://raw.githubusercontent.com/pithud/userscripts/main/pairs/userscript.user.js
@@ -110,7 +110,7 @@
     <button id="pairs-copilot-trigger" title="Pairs AI Copilot">✨</button>
     <div id="pairs-copilot-panel">
       <div class="copilot-header">
-        <span>✨ Pairs AI & プロフィール同期</span>
+        <span>✨ Pairs AI 返信アシスト</span>
         <button id="copilot-close" style="background:none;border:none;font-size:20px;cursor:pointer;">×</button>
       </div>
       <div class="copilot-body">
@@ -190,7 +190,7 @@
         if (raw && !raw.includes('Pairs') && !raw.includes('メッセージ') && raw.length < 20) name = raw;
       }
 
-      // チャット領域要素の除外セット
+      // チャット領域除外
       const msgNodes = document.querySelectorAll('[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"]');
       const chatSet = new Set();
       msgNodes.forEach(n => {
@@ -206,7 +206,7 @@
       });
       msgs = [...new Set(msgs)];
 
-      // 自己紹介文スコアリング（チャット外）
+      // 自己紹介文探索
       const excludeKeywords = ['規約', '通報', '違反報告', 'ブロック', 'いいね', 'スキップ', 'オンライン', '本人確認済', 'メッセージを入力', '写真を送信'];
       const bioIntroKeywords = ['はじめまして', 'よろしくお願いします', '見ていただき', '休日は', '仕事は', '趣味は', '都内在住', 'カフェ', '映画', 'アニメ', '旅行', '音楽'];
 
@@ -352,9 +352,7 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
     });
   });
 
-  // 最初からAI画面を開く
   panel.classList.add('open');
-
   setTimeout(() => { extract(); sync(); }, 1000);
   window.addEventListener('hashchange', () => { 
     panel.classList.add('open');
