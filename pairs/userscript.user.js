@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      2.2.0
+// @version      2.3.0
 // @description  Pairs(Web版)コパイロット（👤プロフ取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -112,7 +112,7 @@
         <div class="copilot-card">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <span style="font-weight:bold; font-size:13px;">👤 相手プロフィール</span>
-            <span id="copilot-mode-badge" style="font-size: 11px; padding: 2px 8px; border-radius: 12px; background: #e0f2fe; color: #0369a1;">取得中...</span>
+            <span id="copilot-mode-badge" style="font-size: 11px; padding: 2px 8px; border-radius: 12px; background: #f1f5f9; color: #64748b;">待機中</span>
           </div>
 
           <!-- アクションボタン（プロフ取得 / 再取得） -->
@@ -125,7 +125,7 @@
             </button>
           </div>
 
-          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 160px; overflow-y: auto; background: #fff; padding: 8px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid #e2e8f0;">初めてのお相手は「👤 プロフ取得」を押してください</div>
+          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 160px; overflow-y: auto; background: #fff; padding: 8px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid #e2e8f0;">お相手のチャット画面で「👤 プロフ取得」を押してください</div>
         </div>
 
         <div>
@@ -218,27 +218,95 @@
   triggerBtn.addEventListener('click', () => { panel.classList.toggle('open'); });
   closeBtn.addEventListener('click', () => { panel.classList.remove('open'); });
 
+  function triggerRealClick(el) {
+    if (!el) return false;
+    try {
+      const opts = { bubbles: true, cancelable: true, view: window };
+      el.dispatchEvent(new PointerEvent('pointerdown', opts));
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new PointerEvent('pointerup', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
+      el.dispatchEvent(new MouseEvent('click', opts));
+      if (typeof el.click === 'function') {
+        el.click();
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function openPartnerProfile() {
+    const headerSelectors = [
+      '[data-test="header-title"] a',
+      '[data-test="header-title"]',
+      'header a[href*="/partner/"]',
+      'header a[href*="/user/"]',
+      'header a[href*="/profile/"]',
+      'header a',
+      '[class*="chatHeader"] a',
+      '[class*="ChatHeader"] a',
+      'header [class*="avatar"]',
+      'header [class*="Avatar"]',
+      'header img[src*="avatar"]',
+      'header img[src*="user"]',
+      'header img',
+      '[class*="handleClickInvitationAssistance"]',
+      '[class*="partner-link"]'
+    ];
+
+    for (const sel of headerSelectors) {
+      const candidates = document.querySelectorAll(sel);
+      for (const el of candidates) {
+        if (el.closest('#pairs-copilot-root')) continue;
+        const txt = (el.innerText || '').trim();
+        if (txt.includes('戻る') || txt.includes('一覧') || txt.includes('設定')) continue;
+        triggerRealClick(el);
+        if (el.parentElement && el.parentElement !== document.body) {
+          triggerRealClick(el.parentElement);
+        }
+      }
+    }
+
+    const timelineAvatars = document.querySelectorAll(
+      '[class*="talkItem"]:not([class*="mine"]) [class*="avatar"], [class*="message"]:not([class*="mine"]) img, [class*="bubble"]:not([class*="mine"]) img, [class*="chat-item"]:not([class*="mine"]) img'
+    );
+    if (timelineAvatars.length > 0) {
+      triggerRealClick(timelineAvatars[0]);
+    }
+  }
+
   // 1. プロフ取得
   fetchProfileBtn.addEventListener('click', () => {
     fetchProfileBtn.textContent = '⏳ 開いて取得中...';
     fetchProfileBtn.disabled = true;
 
-    try {
-      const partnerLink = document.querySelector(
-        '[data-test="header-title"] a, header a[href*="/partner/"], header a[href*="/user/"], header a[href*="/profile/"], [class*="handleClickInvitationAssistance"], [class*="chatHeader"] a, header [class*="avatar"], header img[src*="avatar"]'
-      );
-      if (partnerLink) partnerLink.click();
-    } catch(e){}
+    openPartnerProfile();
 
-    setTimeout(() => {
+    let checkCount = 0;
+    const interval = setInterval(() => {
+      checkCount++;
+
+      document.querySelectorAll('button, a, span, div').forEach(el => {
+        if (el.closest('#pairs-copilot-root')) return;
+        const t = (el.innerText || el.textContent || '').trim();
+        if (t === 'もっと見る' || t === '続きを読む' || t === 'すべて見る' || t === 'さらに表示') {
+          triggerRealClick(el);
+        }
+      });
+
       extractFullProfile();
       extractChatMessages();
-      updatePreview();
-      autoSyncToLocal();
-      fetchProfileBtn.textContent = '👤 プロフ取得';
-      fetchProfileBtn.disabled = false;
-      showToast(cachedData.profileText ? '✅ プロフィール・自己紹介文を保存しました！' : '🔄 プロフィールを取得しました');
-    }, 700);
+
+      if (cachedData.profileText || Object.keys(cachedData.details).length > 0 || checkCount >= 6) {
+        clearInterval(interval);
+        updatePreview();
+        autoSyncToLocal();
+        fetchProfileBtn.textContent = '👤 プロフ取得';
+        fetchProfileBtn.disabled = false;
+        showToast(cachedData.profileText ? '✅ プロフィール・自己紹介文を保存しました！' : '🔄 プロフィールを取得しました');
+      }
+    }, 250);
   });
 
   // 2. 履歴再取得
@@ -252,21 +320,14 @@
       fetchChatBtn.textContent = '🔄 履歴再取得';
       fetchChatBtn.disabled = false;
       showToast(`🔄 会話履歴を最新化しました（${cachedData.messages.length}件）`);
-    }, 300);
+    }, 250);
   });
 
   function extractFullProfile() {
     try {
-      document.querySelectorAll('button, a, span, div').forEach(el => {
-        const t = el.innerText?.trim();
-        if (t && (t === 'もっと見る' || t === '続きを読む' || t === 'すべて見る' || t === 'さらに表示')) {
-          try { el.click(); } catch(e){}
-        }
-      });
-
-      const headerTitle = document.querySelector('[data-test="header-title"], [class*="chatHeader"], header h1, header [class*="title"]');
+      const headerTitle = document.querySelector('[data-test="header-title"], [class*="chatHeader"], [class*="ChatHeader"], header h1, [class*="partner-name"], [class*="profile"] h1');
       if (headerTitle) {
-        const nameSpans = headerTitle.querySelectorAll('span, div');
+        const nameSpans = headerTitle.querySelectorAll('span, div, h1');
         for (let i = nameSpans.length - 1; i >= 0; i--) {
           const t = nameSpans[i].textContent.trim();
           if (t && t.length < 20 && !t.includes('Pairs') && !t.includes('メッセージ') && !t.includes('オンライン')) {
@@ -280,7 +341,7 @@
       const allHeadings = Array.from(document.querySelectorAll('h1, h2, h3, h4, div, span, p'));
       for (const h of allHeadings) {
         if (h.closest('#pairs-copilot-root')) continue;
-        const hText = h.innerText?.trim();
+        const hText = (h.innerText || h.textContent || '').trim();
         if (hText === '自己紹介' || hText === '自己紹介文') {
           const parent = h.parentElement;
           const targetP = parent?.querySelector('p') || h.nextElementSibling?.querySelector('p') || h.nextElementSibling;
@@ -295,38 +356,45 @@
       }
 
       if (!profileText) {
-        const partnerContainers = document.querySelectorAll('[class*="partnerId"], [class*="PromptBoard"], div[class*="-component"], [class*="profile-body"]');
-        for (const container of partnerContainers) {
+        const profileContainers = document.querySelectorAll(
+          '[class*="partner"], [class*="profile"], [class*="PromptBoard"], [class*="dialog"], [role="dialog"], [class*="modal"], [class*="Modal"]'
+        );
+        for (const container of profileContainers) {
           if (container.closest('#pairs-copilot-root')) continue;
-          const p = container.querySelector('p');
-          if (p) {
+          const paragraphs = container.querySelectorAll('p, div[style*="white-space"]');
+          for (const p of paragraphs) {
             const pText = (p.innerText || p.textContent || '').trim();
-            if (pText && pText.length >= 25) {
+            if (pText && pText.length >= 25 && !pText.includes('Pairs') && !pText.includes('規約')) {
               profileText = pText;
               break;
             }
           }
+          if (profileText) break;
         }
       }
 
       if (profileText) cachedData.profileText = profileText.slice(0, 3000);
 
-      const tags = [];
-      document.querySelectorAll('img[src*="community"], img[src*="tag"], img[src*="mytag"], img[alt*="コミュニティ"], img[alt*="タグ"]').forEach(img => {
-        const label = img.alt || img.getAttribute('title') || img.parentElement?.innerText?.trim();
-        if (label && label.length >= 2 && label.length <= 25 && !label.includes('http')) {
-          tags.push(label);
+      // タグ（見える分だけ取得: visible tags only）
+      const visibleTags = [];
+      const tagElements = document.querySelectorAll(
+        '[class*="tag"], [class*="Tag"], [class*="mytag"], [class*="MyTag"], [class*="community"], [class*="Community"], [class*="badge"], [class*="Badge"]'
+      );
+
+      tagElements.forEach(el => {
+        if (el.closest('#pairs-copilot-root')) return;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const txt = (el.innerText || el.textContent || '').trim().replace(/^#/, '');
+          if (txt && txt.length >= 2 && txt.length <= 25 && !txt.match(/^(写真|サブ写真|本人確認|オンライン|ログイン|いいね|スキップ|メッセージ|VIP|プレミアム|もっと見る|続きを読む)$/)) {
+            visibleTags.push(txt);
+          }
         }
       });
-      const tagSelectors = '[class*="mytag"], [class*="MyTag"], [class*="tag"], [class*="Tag"], [class*="community"], [class*="Community"], [class*="badge"]';
-      document.querySelectorAll(tagSelectors).forEach(t => {
-        if (t.closest('#pairs-copilot-root')) return;
-        const txt = (t.innerText || t.textContent || '').trim().replace(/^#/, '');
-        if (txt && txt.length >= 2 && txt.length <= 25 && !txt.match(/^(写真|サブ写真|本人確認|オンライン|ログイン|いいね|スキップ|メッセージ|VIP|プレミアム)$/)) {
-          tags.push(txt);
-        }
-      });
-      if (tags.length > 0) cachedData.tags = [...new Set(tags)];
+
+      if (visibleTags.length > 0) {
+        cachedData.tags = [...new Set(visibleTags)].slice(0, 12);
+      }
 
       const fullText = document.body.innerText;
       const ageMatch = fullText.match(/(\d{2}歳)/);
@@ -334,7 +402,13 @@
       const locMatch = fullText.match(/(東京|神奈川|埼玉|千葉|大阪|愛知|福岡|北海道|京都|兵庫|宮城|広島|[^\s\n\(\)0-9]{2,3}[都道府県])/);
       if (locMatch) cachedData.location = locMatch[1];
 
-      document.querySelectorAll('dl, tr, [class*="item"], [class*="row"]').forEach(row => {
+      const tweetElem = document.querySelector('[class*="tweet"], [class*="Tweet"], [class*="oneWord"], [class*="comment"]');
+      if (tweetElem && !tweetElem.closest('#pairs-copilot-root')) {
+        const t = (tweetElem.innerText || tweetElem.textContent || '').trim();
+        if (t && t.length < 50) cachedData.tweet = t;
+      }
+
+      document.querySelectorAll('dl, tr, [class*="item"], [class*="row"], [class*="spec"]').forEach(row => {
         if (row.closest('#pairs-copilot-root')) return;
         const lines = (row.innerText || '').trim().split(/[\n\t:]+/).map(s => s.trim()).filter(Boolean);
         if (lines.length >= 2) {
@@ -428,7 +502,6 @@
     previewBox.textContent = previewLines.join('\n');
   }
 
-  // ローカルサーバーへ同期（ポート9999 Todo統合サーバー）
   async function autoSyncToLocal() {
     if (!cachedData) return;
     try {
