@@ -16,8 +16,7 @@
   'use strict';
   if (document.getElementById('pairs-copilot-root')) return;
 
-  const SERVER_URLS = ['http://127.0.0.1:3000', 'http://127.0.0.1:3214', 'http://127.0.0.1:9999'];
-  let activeServerUrl = SERVER_URLS[0];
+  const SERVER_URL = 'http://127.0.0.1:9999';
 
   const style = document.createElement('style');
   style.textContent = `
@@ -429,22 +428,20 @@
     previewBox.textContent = previewLines.join('\n');
   }
 
+  // ローカルサーバーへ同期（ポート9999 Todo統合サーバー）
   async function autoSyncToLocal() {
     if (!cachedData) return;
-    for (const url of SERVER_URLS) {
-      try {
-        const res = await fetch(`${url}/api/dating/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cachedData)
-        });
-        if (res.ok) {
-          activeServerUrl = url;
-          syncStatus.textContent = '✅ ローカル保存済';
-          return;
-        }
-      } catch (e) {}
-    }
+    try {
+      const res = await fetch(`${SERVER_URL}/api/dating/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cachedData)
+      });
+      if (res.ok) {
+        syncStatus.textContent = '✅ ローカル保存済';
+        return;
+      }
+    } catch (e) {}
     syncStatus.textContent = '';
   }
 
@@ -489,23 +486,19 @@
     };
 
     let generatedText = '';
-    for (const url of SERVER_URLS) {
-      try {
-        const res = await fetch(`${url}/api/dating/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.draft) {
-            generatedText = json.draft;
-            activeServerUrl = url;
-            break;
-          }
+    try {
+      const res = await fetch(`${SERVER_URL}/api/dating/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.draft) {
+          generatedText = json.draft;
         }
-      } catch (e) {}
-    }
+      }
+    } catch (e) {}
 
     startAiBtn.textContent = '🚀 文章生成（入力完了）';
     startAiBtn.disabled = false;
@@ -519,7 +512,7 @@
         </div>
       `;
     } else {
-      showToast('❌ ローカルサーバーに接続できませんでした（ポート3000 / 3214）');
+      showToast('❌ ローカルサーバー(ポート9999)に接続できませんでした');
     }
   });
 
