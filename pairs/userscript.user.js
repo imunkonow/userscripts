@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      2.5.0
+// @version      2.6.0
 // @description  Pairs(Web版)コパイロット（👤プロフ取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -117,7 +117,7 @@
 
           <!-- アクションボタン（プロフ取得 / 再取得） -->
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:8px;">
-            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（自己紹介文・身長・スペック・タグ）を全取得してローカル保存">
+            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（自己紹介文・身長・スペック・タグ・クエスチョン）を全取得してローカル保存">
               👤 プロフ取得
             </button>
             <button id="copilot-fetch-chat-btn" style="background:#f8fafc; color:#334155; border:1px solid #cbd5e1; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="最新のチャット履歴を再取得して差分を防止">
@@ -235,7 +235,7 @@
     }
   }
 
-  // 1. プロフ取得（画面上のテキスト・スペックを完全解析）
+  // 1. プロフ取得
   fetchProfileBtn.addEventListener('click', () => {
     fetchProfileBtn.textContent = '⏳ 解析中...';
     fetchProfileBtn.disabled = true;
@@ -273,82 +273,102 @@
     }, 200);
   });
 
-  function parseProfileFromText(text) {
-    if (!text) return;
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
-      const line = lines[i];
-      const ageLocMatch = line.match(/^(\d{2}歳)\s*([^\s\d]+)?/);
-      if (ageLocMatch) {
-        cachedData.age = ageLocMatch[1];
-        if (ageLocMatch[2]) cachedData.location = ageLocMatch[2];
-        if (i > 0 && lines[i - 1].length <= 20 && !lines[i - 1].includes('Pairs')) {
-          cachedData.name = lines[i - 1];
-        }
-      }
-    }
-
-    const bioMatch = text.match(/(?:自己紹介|自己紹介文)\s*\n+([\s\S]+?)(?=\n+\s*(?:プロフィール|基本情報|学歴|恋愛|性格|マイタグ|つぶやき|$))/i);
-    if (bioMatch && bioMatch[1].trim().length >= 10) {
-      cachedData.profileText = bioMatch[1].trim().slice(0, 3000);
-    }
-
-    const qMatch = text.match(/(?:ペアーズクエスチョン|Pairsクエスチョン)\s*\n+([\s\S]+?)(?=\n+\s*(?:マイタグ|自己紹介|プロフィール|基本情報|$))/i);
-    if (qMatch) {
-      cachedData.question = qMatch[1].trim().replace(/\n+/g, ' / ');
-    }
-
-    const knownKeys = [
-      'ニックネーム', '年齢', '血液型', '兄弟姉妹', '話せる言語', '居住地', '出身地',
-      '学歴', '職種', '年収', '身長', '体型', '結婚歴', '子供の有無', '結婚に対する意思',
-      '出会うまでの希望', 'デート費用', '初回デート費用', '性格・タイプ', '性格', '社交性',
-      '同居人', '飼っているペット', 'ペット', '休日', 'タバコ', 'お酒', '好きなこと・趣味', '趣味'
-    ];
-
-    for (let i = 0; i < lines.length - 1; i++) {
-      const line = lines[i];
-      if (knownKeys.includes(line)) {
-        const nextLine = lines[i + 1];
-        if (nextLine && !knownKeys.includes(nextLine) && !['基本情報', '学歴・職種・外見', '恋愛・結婚について', '性格・趣味・生活', 'プロフィール', '自己紹介'].includes(nextLine)) {
-          cachedData.details[line] = nextLine;
-          if (line === 'ニックネーム' && nextLine) cachedData.name = nextLine;
-          if (line === '年齢' && nextLine) cachedData.age = nextLine;
-          if (line === '居住地' && nextLine) cachedData.location = nextLine;
-        }
-      }
-    }
-  }
-
   function extractFullProfile() {
     try {
-      const fullText = document.body.innerText;
-      parseProfileFromText(fullText);
-
-      if (!cachedData.name || cachedData.name === 'お相手') {
-        const headerTitle = document.querySelector('[data-test="header-title"], [class*="chatHeader"], [class*="ChatHeader"], header h1, [class*="partner-name"], [class*="profile"] h1');
-        if (headerTitle) {
-          const nameSpans = headerTitle.querySelectorAll('span, div, h1');
-          for (let i = nameSpans.length - 1; i >= 0; i--) {
-            const t = nameSpans[i].textContent.trim();
-            if (t && t.length < 20 && !t.includes('Pairs') && !t.includes('メッセージ') && !t.includes('オンライン')) {
-              cachedData.name = t;
-              break;
+      // 1. プロフィールスペック（<dl class*="evaluatedRows"> または dt/dd）
+      document.querySelectorAll('dl[class*="evaluatedRows"], dl, [class*="evaluatedRows"]').forEach(dl => {
+        if (dl.closest('#pairs-copilot-root')) return;
+        const dts = dl.querySelectorAll('dt');
+        const dds = dl.querySelectorAll('dd');
+        if (dts.length > 0 && dds.length === dts.length) {
+          for (let i = 0; i < dts.length; i++) {
+            const k = dts[i].innerText.trim();
+            const v = dds[i].innerText.trim();
+            if (k && v && k.length <= 15) {
+              cachedData.details[k] = v;
             }
           }
         }
+      });
+
+      if (cachedData.details['ニックネーム']) cachedData.name = cachedData.details['ニックネーム'];
+      if (cachedData.details['年齢']) cachedData.age = cachedData.details['年齢'];
+      if (cachedData.details['居住地']) cachedData.location = cachedData.details['居住地'];
+
+      // 2. ペアーズクエスチョン（[class*="PromptBoard"]）
+      const promptBoard = document.querySelector('[class*="PromptBoard"]');
+      if (promptBoard && !promptBoard.closest('#pairs-copilot-root')) {
+        const texts = Array.from(promptBoard.querySelectorAll('*'))
+          .map(el => el.innerText?.trim())
+          .filter(t => t && !t.includes('ペアーズクエスチョン') && !t.includes('許容感覚') && !t.includes('共通点') && t.length < 80);
+        const uniqueQ = [...new Set(texts)].filter(t => t.length >= 3);
+        if (uniqueQ.length >= 2) {
+          cachedData.question = `Q: ${uniqueQ[0]} ➔ A: ${uniqueQ[1]}`;
+        } else if (uniqueQ.length === 1) {
+          cachedData.question = uniqueQ[0];
+        }
       }
 
-      const visibleTags = [];
-      document.querySelectorAll('a[href*="/mytag/view/"], [class*="tag"], [class*="Tag"], [class*="mytag"], [class*="MyTag"]').forEach(el => {
-        if (el.closest('#pairs-copilot-root')) return;
-        const txt = (el.innerText || el.textContent || '').trim().replace(/^#/, '');
-        if (txt && txt.length >= 2 && txt.length <= 40 && !txt.match(/^(写真|サブ写真|本人確認|オンライン|ログイン|いいね|スキップ|メッセージ|VIP|プレミアム|もっと見る|続きを読む|すべて見る)$/)) {
-          visibleTags.push(txt);
+      // 3. マイタグ（マイタグ見出し配下 または ul[class*="component"]）
+      const mytags = [];
+      const mytagHeadings = Array.from(document.querySelectorAll('h2, h3')).filter(h => h.innerText.trim() === 'マイタグ');
+      mytagHeadings.forEach(h => {
+        const parent = h.closest('div');
+        if (parent) {
+          parent.querySelectorAll('ul li, div, a').forEach(item => {
+            if (item.querySelector('ul, li, h2')) return;
+            const t = item.innerText?.trim();
+            if (t && t.length >= 3 && !t.includes('マイタグ') && !t.includes('すべて見る')) {
+              const cleanTag = t.split('\n')[0].trim();
+              if (cleanTag && cleanTag.length >= 3 && !mytags.includes(cleanTag)) {
+                mytags.push(cleanTag);
+              }
+            }
+          });
         }
       });
-      if (visibleTags.length > 0) {
-        cachedData.tags = [...new Set(visibleTags)].slice(0, 15);
+      if (mytags.length > 0) {
+        cachedData.tags = mytags.slice(0, 15);
+      }
+
+      // 4. 自己紹介文
+      let bio = '';
+      const bioHeadings = Array.from(document.querySelectorAll('h1, h2, h3, div')).filter(el => el.innerText.trim() === '自己紹介');
+      if (bioHeadings.length > 0) {
+        const h = bioHeadings[0];
+        const p = h.closest('div')?.querySelector('p') || h.nextElementSibling?.querySelector('p') || h.nextElementSibling;
+        if (p && p.innerText.trim().length >= 10) {
+          bio = p.innerText.trim();
+        }
+      }
+      if (!bio) {
+        const paragraphs = Array.from(document.querySelectorAll('p, div[style*="white-space"]'))
+          .filter(p => !p.closest('#pairs-copilot-root'))
+          .map(p => p.innerText.trim())
+          .filter(t => t.length >= 35 && !t.includes('Pairs') && !t.includes('規約') && !t.includes('株式会社'));
+        if (paragraphs.length > 0) {
+          bio = paragraphs.reduce((a, b) => a.length > b.length ? a : b, '');
+        }
+      }
+      if (bio) cachedData.profileText = bio.slice(0, 3000);
+
+      // 5. テキスト行走査フォールバック
+      const fullText = document.body.innerText;
+      const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
+      const knownKeys = [
+        'ニックネーム', '年齢', '血液型', '兄弟姉妹', '話せる言語', '居住地', '出身地',
+        '学歴', '職種', '年収', '身長', '体型', '結婚歴', '子供の有無', '結婚に対する意思',
+        '出会うまでの希望', 'デート費用', '初回デート費用', '性格・タイプ', '性格', '社交性',
+        '同居人', '飼っているペット', 'ペット', '休日', 'タバコ', 'お酒', '好きなこと・趣味', '趣味'
+      ];
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i];
+        if (knownKeys.includes(line) && !cachedData.details[line]) {
+          const nextLine = lines[i + 1];
+          if (nextLine && !knownKeys.includes(nextLine) && !['基本情報', '学歴・職種・外見', '恋愛・結婚について', '性格・趣味・生活', 'プロフィール', '自己紹介'].includes(nextLine)) {
+            cachedData.details[line] = nextLine;
+          }
+        }
       }
 
       if (!cachedData.details['身長']) {
