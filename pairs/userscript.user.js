@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.7.0
+// @version      1.8.0
 // @description  Pairs(Web版)の全自動コパイロット（画面開く → 情報取得 → 文章生成ボタン押下 → ローカルAI連携入力完了 → 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -81,14 +81,15 @@
       font-size: 12px;
     }
     .copilot-preview {
-      max-height: 140px;
+      max-height: 180px;
       overflow-y: auto;
       background: #fff;
       padding: 8px;
       border-radius: 4px;
       margin-top: 4px;
       white-space: pre-wrap;
-      line-height: 1.4;
+      line-height: 1.45;
+      border: 1px solid #e2e8f0;
     }
     .copilot-presets {
       display: grid;
@@ -152,6 +153,7 @@
             </div>
           </div>
           <div class="copilot-preview" id="copilot-preview-text">取得中...</div>
+          <div style="font-size:10px; color:#94a3b8; margin-top:4px;">※自己紹介文が未取得の場合は右ペインを展開して「🔄 再取得」を押してください</div>
         </div>
 
         <div>
@@ -164,7 +166,7 @@
           </div>
         </div>
 
-        <!-- メイン文章生成ボタン（ローカルサーバー連携・キー不要） -->
+        <!-- メイン文章生成ボタン（ローカルサーバー連携） -->
         <button id="copilot-generate-main" class="copilot-btn" style="background: linear-gradient(135deg, #2563eb, #1d4ed8);">
           🚀 文章生成（入力完了）
         </button>
@@ -233,7 +235,7 @@
     try {
       document.querySelectorAll('button, a, span, div').forEach(btn => {
         const text = btn.innerText?.trim();
-        if (text && (text === 'もっと見る' || text === '続きを読む' || text === 'すべて見る' || text === 'さらに表示')) {
+        if (text && (text === 'もっと見る' || text === '続きを読む' || text === 'すべて見る' || text === 'さらに表示' || text === 'プロフィールを見る')) {
           try { btn.click(); } catch(e){}
         }
       });
@@ -262,8 +264,14 @@
       }
 
       // チャット領域除外
-      const msgNodes = document.querySelectorAll('[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"]');
       const chatSet = new Set();
+      const inputArea = document.querySelector('textarea, [class*="messageInput"], [class*="ChatInput"], [data-testid*="input"]');
+      if (inputArea) {
+        let p = inputArea.parentElement;
+        for (let i = 0; i < 6 && p; i++) { chatSet.add(p); p = p.parentElement; }
+      }
+
+      const msgNodes = document.querySelectorAll('[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"]');
       msgNodes.forEach(n => {
         chatSet.add(n);
         let p = n.parentElement;
@@ -304,21 +312,22 @@
 
       candidateElements.forEach(el => {
         if (el.closest('#pairs-copilot-root') || chatSet.has(el)) return;
-        if (el.children.length > 8) return;
+        if (el.children.length > 12) return;
         const text = (el.innerText || el.textContent || '').trim();
-        if (!text || text.length < 15 || text.length > 5000) return;
+        if (!text || text.length < 15 || text.length > 6000) return;
         if (excludeKeywords.some(kw => text.includes(kw))) return;
 
         let score = 0;
         if (text.length >= 30) score += 20;
         if (text.length >= 60) score += 30;
-        if (text.length >= 120) score += 30;
-        if (text.includes('\n')) score += 25;
-        if (text.includes('。') || text.includes('、')) score += 15;
-        const hiraganaCount = (text.match(/[\u3040-\u309F]/g) || []).length;
-        if (hiraganaCount > 15) score += 25;
-        bioIntroKeywords.forEach(kw => { if (text.includes(kw)) score += 20; });
-        if ((el.className || '').toString().match(/intro|bio|profile|about|text|detail/i)) score += 35;
+        if (text.length >= 120) score += 35;
+        if (text.includes('\n')) score += 30;
+        if (text.includes('。') || text.includes('、')) score += 20;
+        const particles = (text.match(/[はがをにでのとも]/g) || []).length;
+        if (particles >= 5) score += 25;
+        if (particles >= 15) score += 25;
+        bioIntroKeywords.forEach(kw => { if (text.includes(kw)) score += 25; });
+        if ((el.className || '').toString().match(/intro|bio|profile|about|text|detail/i)) score += 40;
 
         if (score > bestBioScore) {
           bestBioScore = score;
@@ -382,7 +391,7 @@
       };
 
       const specStr = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}:${v}`).join(' / ');
-      const bioStatus = profile ? `✅ ${profile.slice(0, 70)}...` : '⚠️ 未取得（右パネルを開いて「🔄 再取得」）';
+      const bioStatus = profile ? `✅ 取得完了:\n${profile.slice(0, 90)}...` : '⚠️ 未取得（右側のプロフィール欄を開いて「🔄 再取得」）';
       const tagStatus = cached.tags.length > 0 ? `✅ ${cached.tags.slice(0, 5).join(', ')}` : '⚠️ タグ未検出';
 
       preview.textContent = `👤 お相手: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `💬 ひとこと: "${tweet}"\n` : ''}${specStr ? `📋 スペック: ${specStr}\n` : ''}🏷️ タグ: ${tagStatus}\n📝 自己紹介文:\n${bioStatus}`;
