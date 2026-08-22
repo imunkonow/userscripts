@@ -16,7 +16,7 @@
   'use strict';
   if (document.getElementById('pairs-copilot-root')) return;
 
-  const SERVER_URLS = ['http://127.0.0.1:3000', 'http://127.0.0.1:3214'];
+  const SERVER_URLS = ['http://127.0.0.1:9999', 'http://127.0.0.1:3000', 'http://127.0.0.1:3214'];
 
   const style = document.createElement('style');
   style.textContent = `
