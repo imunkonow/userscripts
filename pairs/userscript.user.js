@@ -352,6 +352,12 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
     });
   });
 
+  // 最初からAI画面を開く
+  panel.classList.add('open');
+
   setTimeout(() => { extract(); sync(); }, 1000);
-  window.addEventListener('hashchange', () => { setTimeout(() => { extract(); sync(); }, 600); });
+  window.addEventListener('hashchange', () => { 
+    panel.classList.add('open');
+    setTimeout(() => { extract(); sync(); }, 600); 
+  });
 })();
