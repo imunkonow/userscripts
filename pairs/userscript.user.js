@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.2.0
+// @version      1.3.0
 // @description  Pairs(Web版)のプロフィール詳細（自己紹介文・つぶやき・スペック）と会話履歴から相手別フォルダ自動作成・初回はじめましてメッセージ判定・返信文案自動挿入
 // @author       i
 // @match        https://pairs.lv/*
@@ -116,14 +116,14 @@
       <div class="copilot-body">
         <div class="copilot-card">
           <div style="font-weight:bold;display:flex;justify-content:space-between;align-items:center;">
-            <span>👤 相手プロフィール & 会話</span>
+            <span>👤 相手プロフィール</span>
             <button id="copilot-rescan" style="border:none;background:none;color:#2563eb;font-size:11px;cursor:pointer;font-weight:bold;">🔄 再取得</button>
           </div>
           <div class="copilot-preview" id="copilot-preview-text">取得中...</div>
           <div id="copilot-status-text" style="font-size:11px;margin-top:4px;color:#64748b;"></div>
         </div>
 
-        <button id="copilot-copy-md" class="copilot-btn" style="background:#475569;">📋 相談用Markdownコピー</button>
+        <button id="copilot-copy-md" class="copilot-btn" style="background:#475569;">📋 相談用Markdownコピー（差分のみ）</button>
       </div>
     </div>
     <div id="copilot-user-toast" style="display:none; position:fixed; top:20px; right:20px; z-index:10000000; background:#1e293b; color:#fff; padding:12px 18px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.3); font-size:13px; font-weight:500;"></div>
@@ -140,7 +140,6 @@
   const toast = document.getElementById('copilot-user-toast');
 
   let cached = null;
-  let lastDraftId = null;
 
   function showToast(msg, duration = 3000) {
     if (!toast) return;
@@ -161,7 +160,7 @@
 
   function extract() {
     try {
-      document.querySelectorAll('button, a, span[role="button"], div[role="button"]').forEach(btn => {
+      document.querySelectorAll('button, a, span, div').forEach(btn => {
         const text = btn.innerText?.trim();
         if (text && (text === 'もっと見る' || text === '続きを読む' || text === 'すべて見る')) {
           try { btn.click(); } catch(e){}
@@ -191,26 +190,45 @@
         if (raw && !raw.includes('Pairs') && !raw.includes('メッセージ') && raw.length < 20) name = raw;
       }
 
-      // 自己紹介文スコアリング
+      // チャット領域要素の除外セット
+      const msgNodes = document.querySelectorAll('[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"]');
+      const chatSet = new Set();
+      msgNodes.forEach(n => {
+        chatSet.add(n);
+        let p = n.parentElement;
+        for (let i = 0; i < 4 && p; i++) { chatSet.add(p); p = p.parentElement; }
+        const t = (n.innerText || '').trim();
+        if (t && t.length < 500) {
+          const isMine = n.className?.includes('mine') || n.className?.includes('self') || n.className?.includes('right');
+          const cleanText = t.replace(/^(既読|未読|\d{1,2}:\d{2})\s*/, '').trim();
+          if (cleanText) msgs.push(`${isMine ? '自分' : name}: ${cleanText}`);
+        }
+      });
+      msgs = [...new Set(msgs)];
+
+      // 自己紹介文スコアリング（チャット外）
       const excludeKeywords = ['規約', '通報', '違反報告', 'ブロック', 'いいね', 'スキップ', 'オンライン', '本人確認済', 'メッセージを入力', '写真を送信'];
       const bioIntroKeywords = ['はじめまして', 'よろしくお願いします', '見ていただき', '休日は', '仕事は', '趣味は', '都内在住', 'カフェ', '映画', 'アニメ', '旅行', '音楽'];
 
-      const candidateElements = document.querySelectorAll('p, div, section, article, [dir="auto"]');
+      const candidateElements = document.querySelectorAll('p, div, section, article, [dir="auto"], span, pre');
       let bestBioText = '';
       let bestBioScore = -1;
 
       candidateElements.forEach(el => {
-        if (el.children.length > 5) return;
+        if (el.closest('#pairs-copilot-root') || chatSet.has(el)) return;
+        if (el.children.length > 6) return;
         const text = (el.innerText || el.textContent || '').trim();
-        if (!text || text.length < 25 || text.length > 3000) return;
+        if (!text || text.length < 20 || text.length > 4000) return;
         if (excludeKeywords.some(kw => text.includes(kw))) return;
 
         let score = 0;
-        if (text.length >= 40) score += 20;
-        if (text.length >= 80) score += 30;
-        if (text.includes('\n')) score += 15;
-        bioIntroKeywords.forEach(kw => { if (text.includes(kw)) score += 15; });
-        if ((el.className || '').toString().match(/intro|bio|profile|about|text|detail/i)) score += 25;
+        if (text.length >= 35) score += 20;
+        if (text.length >= 70) score += 30;
+        if (text.length >= 120) score += 30;
+        if (text.includes('\n')) score += 25;
+        if (text.includes('。') || text.includes('、')) score += 15;
+        bioIntroKeywords.forEach(kw => { if (text.includes(kw)) score += 20; });
+        if ((el.className || '').toString().match(/intro|bio|profile|about|text|detail/i)) score += 30;
 
         if (score > bestBioScore) {
           bestBioScore = score;
@@ -220,7 +238,7 @@
       profile = bestBioText;
 
       const tweetElem = document.querySelector('[class*="tweet"], [class*="Tweet"], [class*="catchphrase"], [class*="oneWord"], [data-testid*="tweet"]');
-      if (tweetElem) tweet = tweetElem.textContent.trim().replace(/^["「『]|["」』]$/g, '');
+      if (tweetElem && !chatSet.has(tweetElem)) tweet = tweetElem.textContent.trim().replace(/^["「『]|["」』]$/g, '');
 
       const fullBodyText = document.body.innerText;
       const ageMatch = fullBodyText.match(/(\d{2}歳)/);
@@ -229,6 +247,7 @@
       if (locMatch) location = locMatch[1];
 
       document.querySelectorAll('dl, tr, [class*="item"], [class*="row"]').forEach(row => {
+        if (row.closest('#pairs-copilot-root') || chatSet.has(row)) return;
         const lines = (row.innerText || '').trim().split(/[\n\t:]+/).map(s => s.trim()).filter(Boolean);
         if (lines.length >= 2) {
           const k = lines[0];
@@ -240,22 +259,13 @@
       });
 
       document.querySelectorAll('[class*="mytag"], [class*="tag"], [class*="community"], [class*="badge"]').forEach(n => {
+        if (n.closest('#pairs-copilot-root') || chatSet.has(n)) return;
         const t = (n.innerText || '').trim().replace(/^#/, '');
         if (t && t.length < 25 && !t.match(/^(写真|サブ写真|本人確認|オンライン|ログイン|いいね|スキップ|メッセージ)$/)) {
           tags.push(t);
         }
       });
 
-      document.querySelectorAll('[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"]').forEach(n => {
-        const t = (n.innerText || '').trim();
-        if (t && t.length < 500) {
-          const isMine = n.className?.includes('mine') || n.className?.includes('self') || n.className?.includes('right');
-          const cleanText = t.replace(/^(既読|未読|\d{1,2}:\d{2})\s*/, '').trim();
-          if (cleanText) msgs.push(`${isMine ? '自分' : name}: ${cleanText}`);
-        }
-      });
-
-      msgs = [...new Set(msgs)].slice(-20);
       const hasMyMessage = msgs.some(m => m.startsWith('自分:'));
       const isFirstMessage = (msgs.length === 0 || !hasMyMessage);
 
@@ -270,7 +280,7 @@
         location,
         tweet,
         details,
-        profileText: profile.slice(0, 2500),
+        profileText: profile.slice(0, 3000),
         tags: [...new Set(tags)],
         messages: msgs,
         isFirstMessage,
@@ -278,9 +288,9 @@
       };
 
       const specStr = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}:${v}`).join(' / ');
-      const bioStatus = profile ? `✅ ${profile.slice(0, 60)}...` : '⚠️ 未取得（右パネルを開いて「🔄 再取得」）';
+      const bioStatus = profile ? `✅ ${profile.slice(0, 80)}...` : '⚠️ 未取得（右パネルを開いて「🔄 再取得」）';
 
-      preview.textContent = `👤 【お相手】: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `💬 【ひとこと】: "${tweet}"\n` : ''}${specStr ? `📋 【スペック】: ${specStr}\n` : ''}🏷️ 【タグ】: ${cached.tags.slice(0, 4).join(', ') || 'なし'}\n📝 【自己紹介文】:\n${bioStatus}\n【フェーズ】: ${isFirstMessage ? '🐣 初回メッセージ' : `💬 やり取り中 (${msgs.length}件)`}`;
+      preview.textContent = `👤 お相手: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `💬 ひとこと: "${tweet}"\n` : ''}${specStr ? `📋 スペック: ${specStr}\n` : ''}🏷️ タグ: ${cached.tags.slice(0, 4).join(', ') || 'なし'}\n📝 自己紹介文:\n${bioStatus}\n【フェーズ】: ${isFirstMessage ? '🐣 初回メッセージ' : `💬 やり取り中 (${msgs.length}件)`}`;
     } catch (e) {
       preview.textContent = '取得エラー';
     }
@@ -322,33 +332,26 @@
   copyMdBtn.addEventListener('click', () => {
     if (!cached) extract();
     const d = cached;
-    const detailsBlock = Object.keys(d.details).length > 0
-      ? Object.entries(d.details).map(([k, v]) => `- **${k}**: ${v}`).join('\n')
-      : '- なし';
+    const diffMessages = d.messages.slice(-3);
 
-    const md = `# お相手情報: ${d.name} (${d.userId})
-- **年齢・居住地**: ${d.age || '不明'} / ${d.location || '不明'}
+    const md = `# お相手: ${d.name} (${d.age || '不明'} / ${d.location || '不明'})
 - **ひとこと**: ${d.tweet ? `「${d.tweet}」` : 'なし'}
-- **URL**: ${d.rawUrl}
-- **マイタグ**: ${d.tags.join(', ') || 'なし'}
-- **フェーズ**: ${d.isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : '💬 やり取り中'}
-
-## 基本スペック
-${detailsBlock}
+- **タグ**: ${d.tags.slice(0, 6).join(', ') || 'なし'}
+- **状態**: ${d.isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : '💬 やり取り中'}
 
 ## 自己紹介文
 \`\`\`
 ${d.profileText || '（自己紹介文未取得）'}
 \`\`\`
 
-## 会話履歴
-${d.messages.length > 0 ? d.messages.map(m => `- ${m}`).join('\n') : '- （会話履歴なし・初回メッセージ）'}
+## 直近の会話（差分）
+${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （初回メッセージ・会話履歴なし）'}
 `;
     navigator.clipboard.writeText(md).then(() => {
-      showToast('📋 Markdownをコピーしました');
+      showToast('📋 相談用Markdown（差分）をコピーしました');
     });
   });
 
-  setTimeout(() => { extract(); sync(); }, 1200);
-  window.addEventListener('hashchange', () => { setTimeout(() => { extract(); sync(); }, 800); });
+  setTimeout(() => { extract(); sync(); }, 1000);
+  window.addEventListener('hashchange', () => { setTimeout(() => { extract(); sync(); }, 600); });
 })();
