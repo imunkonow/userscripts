@@ -1,18 +1,15 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.6.0
-// @description  Pairs(Web版)の全自動コパイロット（画面開く → 情報取得 → 文章生成ボタン押下 → メッセージ入力完了 → 手動送信）
+// @version      1.7.0
+// @description  Pairs(Web版)の全自動コパイロット（画面開く → 情報取得 → 文章生成ボタン押下 → ローカルAI連携入力完了 → 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
 // @updateURL    https://raw.githubusercontent.com/pithud/userscripts/main/pairs/userscript.user.js
 // @downloadURL  https://raw.githubusercontent.com/pithud/userscripts/main/pairs/userscript.user.js
 // @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
 // @connect      127.0.0.1
 // @connect      localhost
-// @connect      generativelanguage.googleapis.com
 // ==/UserScript==
 
 (function() {
@@ -20,23 +17,6 @@
   if (document.getElementById('pairs-copilot-root')) return;
 
   const SERVER_URLS = ['http://127.0.0.1:9999', 'http://127.0.0.1:3000', 'http://127.0.0.1:3214'];
-
-  const DEFAULT_RULES = `・質問は1つに絞る
-・相手の話に共感・リアクションを入れてから質問する
-・質問に答えるときは簡潔にし、多くを語りすぎない
-・絵文字は基本的に控えめ（相手が使う場合のみ同等程度に合わせる）
-・読みやすいように適度に改行を入れて一文を短くする（3行以上になる場合は2つの文章に分ける）
-・マイタグよりも自己紹介文の内容を優先して拾う
-・謙遜しすぎない、対等で自然なトーン
-・語尾に ! / ? / 笑 などを自然に組み合わせる`;
-
-  const FIRST_MESSAGE_RULES = `【初回メッセージ（はじめまして）のルール】
-・まず挨拶とマッチのお礼、名乗りを入れる（例:「はじめまして！マッチングありがとうございます。山田太郎といいます！」）
-・マイタグよりも相手の「自己紹介文」の内容（好きなこと、趣味、休日の過ごし方等）を優先して拾う
-・共感・リアクションを入れる（例:「僕も○○が好きで〜」「○○いいですね！」）
-・質問は1つだけに絞り、相手が返信しやすい内容にする
-・絵文字は使わない（または極めて控えめ）
-・文章は短く、適度に改行を入れて読みやすくする`;
 
   const style = document.createElement('style');
   style.textContent = `
@@ -159,7 +139,7 @@
     <button id="pairs-copilot-trigger" title="Pairs AI Copilot">✨</button>
     <div id="pairs-copilot-panel">
       <div class="copilot-header">
-        <span>✨ Pairs AI 返信アシスト</span>
+        <span>✨ Pairs AI 返信アシスト（ローカル連携）</span>
         <button id="copilot-close" style="background:none;border:none;font-size:20px;cursor:pointer;">×</button>
       </div>
       <div class="copilot-body">
@@ -184,19 +164,10 @@
           </div>
         </div>
 
-        <!-- メイン文章生成ボタン（押すと生成して入力欄にセット） -->
+        <!-- メイン文章生成ボタン（ローカルサーバー連携・キー不要） -->
         <button id="copilot-generate-main" class="copilot-btn" style="background: linear-gradient(135deg, #2563eb, #1d4ed8);">
           🚀 文章生成（入力完了）
         </button>
-
-        <!-- APIキー未設定時のボックス -->
-        <div id="copilot-key-box" style="display:none; background:#fffbeb; border:1px solid #fde68a; padding:10px; border-radius:8px; font-size:12px;">
-          <div style="font-weight:bold; color:#b45309; margin-bottom:4px;">🔑 Gemini API Key を設定</div>
-          <div style="display:flex; gap:6px;">
-            <input type="password" id="copilot-key-input" placeholder="AIzaSy..." style="flex:1; padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
-            <button id="copilot-save-key" class="copilot-pill-btn" style="background:#2563eb; color:#fff; border:none;">保存</button>
-          </div>
-        </div>
 
         <div id="copilot-result-box" style="font-size:12px;"></div>
 
@@ -218,9 +189,6 @@
   const modeBadge = document.getElementById('copilot-mode');
   const generateMainBtn = document.getElementById('copilot-generate-main');
   const copyMdBtn = document.getElementById('copilot-copy-md');
-  const keyBox = document.getElementById('copilot-key-box');
-  const keyInput = document.getElementById('copilot-key-input');
-  const saveKeyBtn = document.getElementById('copilot-save-key');
   const resultBox = document.getElementById('copilot-result-box');
   const statusText = document.getElementById('copilot-status-text');
   const toast = document.getElementById('copilot-user-toast');
@@ -246,14 +214,6 @@
 
   presetBtns.forEach(btn => {
     btn.addEventListener('click', () => setPreset(btn.getAttribute('data-preset')));
-  });
-
-  saveKeyBtn.addEventListener('click', () => {
-    const k = keyInput.value.trim();
-    if (!k) return;
-    localStorage.setItem('pairs_gemini_api_key', k);
-    keyBox.style.display = 'none';
-    showToast('🔑 APIキーを保存しました！「文章生成」を押してください。');
   });
 
   trigger.addEventListener('click', () => {
@@ -489,70 +449,53 @@
     }
   }
 
-  // 🚀 文章生成（入力完了）ボタン
+  // 🚀 文章生成（入力完了）: ローカルサーバー（ポート9999）連携
   generateMainBtn.addEventListener('click', () => {
     extract();
-    const apiKey = localStorage.getItem('pairs_gemini_api_key');
-    if (!apiKey) {
-      keyBox.style.display = 'block';
-      showToast('🔑 Gemini API Key を設定してください');
-      return;
-    }
-
-    const isFirst = (currentPreset === 'first_message' || cached.isFirstMessage);
-    generateMainBtn.textContent = '⏳ 文章生成中...';
+    generateMainBtn.textContent = '⏳ ローカルAI生成中...';
     generateMainBtn.disabled = true;
 
-    const myName = '山田太郎';
-    const activeRules = isFirst ? FIRST_MESSAGE_RULES : DEFAULT_RULES;
-    const recentMessages = cached.messages.slice(-5);
+    const payload = {
+      ...cached,
+      preset: currentPreset
+    };
 
-    const prompt = `あなたはマッチングアプリ（Pairs）の返信アシスタントです。最適な${isFirst ? '初回メッセージ（はじめましてメッセージ）' : '返信文案'}を1つ作成してください。解説は不要です。
-
-# 自分の名前
-${myName}
-
-# ルール
-${activeRules}
-
-# お相手情報
-- 名前: ${cached.name}
-- 年齢・居住地: ${cached.age || '不明'} / ${cached.location || '不明'}
-- ひとこと: ${cached.tweet || 'なし'}
-- マイタグ: ${cached.tags.join(', ') || 'なし'}
-- 基本スペック: ${JSON.stringify(cached.details)}
-
-## 自己紹介文
-${cached.profileText || '（自己紹介文なし）'}
-
-## 直近の会話（差分）
-${recentMessages.length > 0 ? recentMessages.join('\n') : '（初回メッセージです）'}`;
-
-    GM_xmlhttpRequest({
-      method: 'POST',
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      onload: function(res) {
+    function tryGenerate(urlIndex = 0) {
+      if (urlIndex >= SERVER_URLS.length) {
         generateMainBtn.textContent = '🚀 文章生成（入力完了）';
         generateMainBtn.disabled = false;
-        try {
-          const json = JSON.parse(res.responseText);
-          const generated = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-          if (generated) {
-            insertToInput(generated);
-            resultBox.innerHTML = `<div style="background:#f1f5f9;padding:8px;border-radius:6px;margin-top:6px;"><strong>セットした文案:</strong><br>${generated}</div>`;
-          }
-        } catch(e) {
-          showToast(`❌ 生成エラー: ${e.message}`);
-        }
-      },
-      onerror: function() {
-        generateMainBtn.textContent = '🚀 文章生成（入力完了）';
-        generateMainBtn.disabled = false;
-        showToast('❌ 通信エラー');
+        showToast('❌ ローカルサーバー(ポート9999)に接続できませんでした');
+        return;
       }
-    });
+
+      const sUrl = SERVER_URLS[urlIndex];
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${sUrl}/api/dating/generate`,
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify(payload),
+        onload: function(res) {
+          generateMainBtn.textContent = '🚀 文章生成（入力完了）';
+          generateMainBtn.disabled = false;
+          try {
+            const json = JSON.parse(res.responseText);
+            if (json.draft) {
+              insertToInput(json.draft);
+              resultBox.innerHTML = `<div style="background:#f1f5f9;padding:8px;border-radius:6px;margin-top:6px;"><strong>セットした文案:</strong><br>${json.draft}</div>`;
+            } else {
+              showToast('❌ 文案の生成に失敗しました');
+            }
+          } catch(e) {
+            tryGenerate(urlIndex + 1);
+          }
+        },
+        onerror: function() {
+          tryGenerate(urlIndex + 1);
+        }
+      });
+    }
+
+    tryGenerate(0);
   });
 
   copyMdBtn.addEventListener('click', () => {
@@ -579,9 +522,6 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
   });
 
   panel.classList.add('open');
-  const savedKey = localStorage.getItem('pairs_gemini_api_key');
-  if (!savedKey) keyBox.style.display = 'block';
-
   setTimeout(() => { extract(); sync(); }, 1000);
   setTimeout(() => { extract(); }, 2500);
   window.addEventListener('hashchange', () => { 
