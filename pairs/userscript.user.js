@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.0.1
-// @description  Pairs(Web版)コパイロット（👤プロフ全部取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
+// @version      3.1.0
+// @description  Pairs(Web版)コパイロット（👤プロフ取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
 // @updateURL    https://raw.githubusercontent.com/pithud/userscripts/main/pairs/userscript.user.js
@@ -117,15 +117,16 @@
 
           <!-- アクションボタン（プロフ取得 / 再取得） -->
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:8px;">
-            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（自己紹介・クエスチョン・タグ・スペック全内容）を丸ごと全部取得してローカル保存">
-              👤 プロフ取得（全部取得）
+            <button id="copilot-fetch-profile-btn" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="画面上のプロフィール（自己紹介・クエスチョン・タグ・スペック）を全自動取得">
+              👤 プロフ取得
             </button>
             <button id="copilot-fetch-chat-btn" style="background:#f8fafc; color:#334155; border:1px solid #cbd5e1; padding:8px 6px; font-weight:bold; font-size:12px; border-radius:6px; cursor:pointer;" title="最新のチャット履歴を再取得して差分を防止">
               🔄 履歴再取得
             </button>
           </div>
 
-          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 180px; overflow-y: auto; background: #fff; padding: 8px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid #e2e8f0;">お相手の画面で「👤 プロフ取得（全部取得）」を押してください</div>
+          <div id="copilot-extracted-preview" style="white-space: pre-wrap; max-height: 180px; overflow-y: auto; background: #fff; padding: 8px; border-radius: 6px; font-size: 12px; line-height: 1.45; border: 1px solid #e2e8f0;">お相手の画面で「👤 プロフ取得」を押してください</div>
+          <button id="copilot-paste-btn" style="width:100%; margin-top:6px; background:#f1f5f9; border:1px dashed #cbd5e1; padding:4px; font-size:11px; color:#475569; border-radius:4px; cursor:pointer;">📋 コピーしたテキストを直接貼り付けて解析</button>
         </div>
 
         <div>
@@ -148,7 +149,7 @@
         <div id="copilot-results-container"></div>
 
         <div style="margin-top: 4px; border-top: 1px solid #f1f5f9; padding-top: 8px; display:flex; justify-content:space-between; align-items:center;">
-          <button id="copilot-copy-md-btn" style="background:none; border:none; color:#64748b; font-size:11px; cursor:pointer; padding:0;">📋 相談用Markdownコピー（全部）</button>
+          <button id="copilot-copy-md-btn" style="background:none; border:none; color:#64748b; font-size:11px; cursor:pointer; padding:0;">📋 相談用Markdownコピー（差分）</button>
           <span id="copilot-sync-status" style="font-size: 11px; color: #059669; font-weight: 500;"></span>
         </div>
       </div>
@@ -162,6 +163,7 @@
   const closeBtn = document.getElementById('copilot-close-btn');
   const fetchProfileBtn = document.getElementById('copilot-fetch-profile-btn');
   const fetchChatBtn = document.getElementById('copilot-fetch-chat-btn');
+  const pasteBtn = document.getElementById('copilot-paste-btn');
   const syncStatus = document.getElementById('copilot-sync-status');
   const copyMdBtn = document.getElementById('copilot-copy-md-btn');
   const previewBox = document.getElementById('copilot-extracted-preview');
@@ -236,9 +238,9 @@
     }
   }
 
-  // 1. プロフ取得（全部取得）
+  // 1. プロフ取得
   fetchProfileBtn.addEventListener('click', () => {
-    fetchProfileBtn.textContent = '⏳ 全部取得中...';
+    fetchProfileBtn.textContent = '⏳ 解析中...';
     fetchProfileBtn.disabled = true;
 
     document.querySelectorAll('button, a, span, div').forEach(el => {
@@ -254,9 +256,9 @@
       extractChatMessages();
       updatePreview();
       autoSyncToLocal();
-      fetchProfileBtn.textContent = '👤 プロフ取得（全部取得）';
+      fetchProfileBtn.textContent = '👤 プロフ取得';
       fetchProfileBtn.disabled = false;
-      showToast('✅ プロフィール内容を丸ごと全部取得しました！');
+      showToast('✅ プロフィールを解析・保存しました！');
     }, 150);
   });
 
@@ -274,58 +276,157 @@
     }, 150);
   });
 
+  // 3. クリップボード貼り付け
+  pasteBtn.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim().length > 10) {
+        parseProfileTextContent(text.trim());
+        extractChatMessages();
+        updatePreview();
+        autoSyncToLocal();
+        showToast('✅ 貼り付けたテキストから解析・保存しました！');
+      } else {
+        const input = prompt('プロフィールのテキストをここに貼り付けてください:');
+        if (input && input.trim()) {
+          parseProfileTextContent(input.trim());
+          extractChatMessages();
+          updatePreview();
+          autoSyncToLocal();
+          showToast('✅ 解析・保存しました！');
+        }
+      }
+    } catch (e) {
+      const input = prompt('プロフィールのテキストをここに貼り付けてください:');
+      if (input && input.trim()) {
+        parseProfileTextContent(input.trim());
+        extractChatMessages();
+        updatePreview();
+        autoSyncToLocal();
+        showToast('✅ 解析・保存しました！');
+      }
+    }
+  });
+
+  function parseProfileTextContent(allText) {
+    if (!allText) return;
+    cachedData.rawProfile = allText;
+
+    const lines = allText.split('\n').map(l => l.trim()).filter(Boolean);
+
+    for (let i = 0; i < Math.min(lines.length, 15); i++) {
+      const line = lines[i];
+      const ageLocMatch = line.match(/^(\d{2}歳)\s*([^\s\d]+)?/);
+      if (ageLocMatch) {
+        cachedData.age = ageLocMatch[1];
+        if (ageLocMatch[2]) cachedData.location = ageLocMatch[2];
+        if (i > 0 && lines[i - 1].length <= 20 && !lines[i - 1].includes('Pairs') && !lines[i - 1].includes('戻る')) {
+          cachedData.name = lines[i - 1];
+        }
+        break;
+      }
+    }
+
+    const qMatch = allText.match(/(?:ペアーズクエスチョン|Pairsクエスチョン)\s*\n+([\s\S]+?)(?=\n+\s*(?:マイタグ|自己紹介|プロフィール|基本情報|$))/i);
+    if (qMatch) {
+      const qLines = qMatch[1].split('\n').map(s => s.trim()).filter(s => s && !s.includes('許容感覚') && !s.includes('共通点'));
+      if (qLines.length >= 2) {
+        cachedData.question = `${qLines[0]} ➔ ${qLines[1]}`;
+      } else if (qLines.length === 1) {
+        cachedData.question = qLines[0];
+      }
+    }
+
+    const tagMatch = allText.match(/マイタグ\s*\n+([\s\S]+?)(?=\n+\s*(?:自己紹介|プロフィール|基本情報|$))/i);
+    if (tagMatch) {
+      const tLines = tagMatch[1].split('\n')
+        .map(s => s.replace(/\[|\]|\(http[^)]+\)/g, '').trim())
+        .filter(s => s && s.length >= 3 && !s.includes('すべて見る') && !s.match(/^(写真|本人確認|オンライン|生活|美容・健康|恋愛・結婚)$/));
+      const cleanTags = tLines.map(t => t.split(/生活|美容|恋愛|心と身体/)[0].trim()).filter(Boolean);
+      if (cleanTags.length > 0) {
+        cachedData.tags = [...new Set(cleanTags)].slice(0, 15);
+      }
+    }
+
+    const bioMatch = allText.match(/(?:自己紹介|自己紹介文)\s*\n+([\s\S]+?)(?=\n+\s*(?:プロフィール|基本情報|学歴|恋愛|性格|マイタグ|つぶやき|$))/i);
+    if (bioMatch && bioMatch[1].trim().length >= 10) {
+      cachedData.profileText = bioMatch[1].trim().slice(0, 3000);
+    }
+
+    const knownKeys = [
+      'ニックネーム', '年齢', '血液型', '兄弟姉妹', '話せる言語', '居住地', '出身地',
+      '学歴', '職種', '年収', '身長', '体型', '結婚歴', '子供の有無', '結婚に対する意思',
+      '出会うまでの希望', 'デート費用', '初回デート費用', '性格・タイプ', '性格', '社交性',
+      '同居人', '飼っているペット', 'ペット', '休日', 'タバコ', 'お酒', '好きなこと・趣味', '趣味'
+    ];
+
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i];
+      if (knownKeys.includes(line)) {
+        const nextLine = lines[i + 1];
+        if (nextLine && !knownKeys.includes(nextLine) && !['基本情報', '学歴・職種・外見', '恋愛・結婚について', '性格・趣味・生活', 'プロフィール', '自己紹介'].includes(nextLine)) {
+          cachedData.details[line] = nextLine;
+          if (line === 'ニックネーム' && nextLine) cachedData.name = nextLine;
+          if (line === '年齢' && nextLine) cachedData.age = nextLine;
+          if (line === '居住地' && nextLine) cachedData.location = nextLine;
+        }
+      }
+    }
+  }
+
   function extractFullProfile() {
     try {
-      const partnerContainer = document.querySelector('[class*="partnerId"], [class*="PartnerView"], [role="dialog"], main, [class*="messageListRef"]');
-      let allText = '';
-
-      if (partnerContainer && partnerContainer.innerText && partnerContainer.innerText.trim().length > 30) {
-        allText = partnerContainer.innerText.trim();
-      } else {
-        allText = document.body.innerText.trim();
-      }
+      const container = document.querySelector('[class*="partnerId"], [class*="PartnerView"], [role="dialog"], main') || document.body;
+      let fullText = container.innerText || document.body.innerText || '';
 
       const copilotRoot = document.getElementById('pairs-copilot-root');
-      if (copilotRoot && copilotRoot.innerText) {
-        const copilotText = copilotRoot.innerText.trim();
-        if (copilotText && allText.includes(copilotText)) {
-          allText = allText.replace(copilotText, '').trim();
-        }
+      if (copilotRoot && copilotRoot.innerText && fullText.includes(copilotRoot.innerText.trim())) {
+        fullText = fullText.replace(copilotRoot.innerText.trim(), '').trim();
       }
 
-      if (allText) {
-        cachedData.rawProfile = allText;
-        cachedData.profileText = allText;
-      }
+      parseProfileTextContent(fullText);
 
-      const lines = allText.split('\n').map(l => l.trim()).filter(Boolean);
-      for (let i = 0; i < Math.min(lines.length, 15); i++) {
-        const line = lines[i];
-        const ageMatch = line.match(/(\d{2}歳)/);
-        if (ageMatch) {
-          cachedData.age = ageMatch[1];
-          const locMatch = line.match(/(東京|神奈川|埼玉|千葉|大阪|愛知|福岡|北海道|京都|兵庫|宮城|広島|[^\s\n\(\)0-9]{2,3}[都道府県])/);
-          if (locMatch) cachedData.location = locMatch[1];
-          if (i > 0 && lines[i - 1].length <= 20 && !lines[i - 1].includes('Pairs') && !lines[i - 1].includes('戻る')) {
-            cachedData.name = lines[i - 1];
+      document.querySelectorAll('dl[class*="evaluatedRows"], dl').forEach(dl => {
+        if (dl.closest('#pairs-copilot-root')) return;
+        const dts = dl.querySelectorAll('dt');
+        const dds = dl.querySelectorAll('dd');
+        if (dts.length > 0 && dds.length === dts.length) {
+          for (let i = 0; i < dts.length; i++) {
+            const k = dts[i].innerText.trim();
+            const v = dds[i].innerText.trim();
+            if (k && v && k.length <= 15) {
+              cachedData.details[k] = v;
+            }
           }
-          break;
+        }
+      });
+
+      if (cachedData.tags.length === 0) {
+        const domTags = [];
+        document.querySelectorAll('a[href*="/mytag/view/"], [class*="tag"], [class*="Tag"], [class*="mytag"]').forEach(el => {
+          if (el.closest('#pairs-copilot-root')) return;
+          const txt = (el.innerText || el.textContent || '').trim().replace(/^#/, '');
+          if (txt && txt.length >= 3 && !txt.includes('すべて見る') && !txt.match(/^(写真|本人確認|オンライン|ログイン|メッセージ|VIP)$/)) {
+            domTags.push(txt.split('\n')[0].trim());
+          }
+        });
+        if (domTags.length > 0) {
+          cachedData.tags = [...new Set(domTags)].slice(0, 15);
         }
       }
 
-      for (let i = 0; i < lines.length - 1; i++) {
-        if (lines[i] === 'ニックネーム' && lines[i + 1]) cachedData.name = lines[i + 1];
-        if (lines[i] === '年齢' && lines[i + 1]) cachedData.age = lines[i + 1];
-        if (lines[i] === '居住地' && lines[i + 1]) cachedData.location = lines[i + 1];
-      }
-
-      const heightMatch = allText.match(/(\d{3}\s*cm)/i) || allText.match(/身長\s*[\n\t:]*\s*(\d{3}\s*cm?)/i);
-      if (heightMatch) {
-        cachedData.details['身長'] = heightMatch[1].replace(/\s+/g, '');
+      if (!cachedData.profileText) {
+        const paragraphs = Array.from(document.querySelectorAll('p, div[style*="white-space"]'))
+          .filter(p => !p.closest('#pairs-copilot-root'))
+          .map(p => p.innerText.trim())
+          .filter(t => t.length >= 35 && !t.includes('Pairs') && !t.includes('規約'));
+        if (paragraphs.length > 0) {
+          cachedData.profileText = paragraphs.reduce((a, b) => a.length > b.length ? a : b, '');
+        }
       }
 
     } catch (e) {
-      console.error('Full profile extraction error:', e);
+      console.error('Full extraction error:', e);
     }
   }
 
@@ -387,13 +488,42 @@
 
   function updatePreview() {
     const d = cachedData;
-    const fullContent = d.rawProfile || d.profileText;
     
-    if (fullContent) {
-      previewBox.textContent = `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})\n\n【取得したプロフィール全文】\n${fullContent}`;
-    } else {
-      previewBox.textContent = '未取得（お相手の画面で「👤 プロフ取得（全部取得）」を押してください）';
+    const specItems = [];
+    if (d.details['身長']) specItems.push(`身長: ${d.details['身長']}`);
+    if (d.details['体型']) specItems.push(`体型: ${d.details['体型']}`);
+    if (d.details['職種'] || d.details['仕事']) specItems.push(`職種: ${d.details['職種'] || d.details['仕事']}`);
+    if (d.details['学歴']) specItems.push(`学歴: ${d.details['学歴']}`);
+    if (d.details['休日']) specItems.push(`休日: ${d.details['休日']}`);
+    if (d.details['血液型']) specItems.push(`血液型: ${d.details['血液型']}`);
+    if (d.details['同居人']) specItems.push(`同居: ${d.details['同居人']}`);
+    if (d.details['タバコ']) specItems.push(`タバコ: ${d.details['タバコ']}`);
+
+    for (const [k, v] of Object.entries(d.details)) {
+      if (!['身長', '体型', '職種', '仕事', '学歴', '休日', '血液型', '同居人', 'タバコ', 'ニックネーム', '年齢', '居住地'].includes(k)) {
+        if (specItems.length < 8) specItems.push(`${k}: ${v}`);
+      }
     }
+
+    const specSummary = specItems.length > 0 ? specItems.join(' | ') : '未取得';
+
+    const bioStatus = d.profileText 
+      ? `✅ 取得完了:\n${d.profileText.slice(0, 110)}${d.profileText.length > 110 ? '...' : ''}` 
+      : '⚠️ 未取得';
+
+    const tagStatus = d.tags.length > 0 
+      ? `✅ ${d.tags.slice(0, 4).join(', ')}${d.tags.length > 4 ? ` 他${d.tags.length - 4}件` : ''}` 
+      : '⚠️ 未取得';
+
+    const previewLines = [
+      `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})`,
+      d.question ? `❓ クエスチョン: ${d.question}` : null,
+      `📋 スペック: ${specSummary}`,
+      `🏷️ マイタグ: ${tagStatus}`,
+      `📝 自己紹介文:\n${bioStatus}`
+    ].filter(Boolean);
+
+    previewBox.textContent = previewLines.join('\n');
   }
 
   async function autoSyncToLocal() {
@@ -487,20 +617,26 @@
     extractChatMessages();
     const d = cachedData;
     const diffMessages = d.messages.slice(-4);
+    const specLines = Object.entries(d.details).map(([k, v]) => `- **${k}**: ${v}`).join('\n') || '- （スペック未取得）';
 
     const md = `# お相手: ${d.name} (${d.age || '不明'} / ${d.location || '不明'})
+- **ひとこと/クエスチョン**: ${d.question ? `「${d.question}」` : (d.tweet || 'なし')}
+- **マイタグ**: ${d.tags.slice(0, 8).join(', ') || 'なし'}
 - **状態**: ${d.isFirstMessage ? '🐣 初回メッセージ（はじめまして）' : '💬 やり取り中'}
 
-## プロフィール全文（自己紹介・クエスチョン・タグ・スペック）
+## 基本スペック
+${specLines}
+
+## 自己紹介文
 \`\`\`
-${d.rawProfile || d.profileText || '（未取得）'}
+${d.profileText || '（自己紹介文未取得）'}
 \`\`\`
 
 ## 直近の会話（差分）
 ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （初回メッセージ・会話履歴なし）'}
 `;
     navigator.clipboard.writeText(md).then(() => {
-      showToast('📋 相談用Markdown（全文）をコピーしました');
+      showToast('📋 相談用Markdown（差分）をコピーしました');
     });
   });
 
@@ -512,7 +648,7 @@ ${diffMessages.length > 0 ? diffMessages.map(m => `- ${m}`).join('\n') : '- （�
 
   window.addEventListener('hashchange', () => { 
     panel.classList.add('open');
-    previewBox.textContent = 'お相手を切り替えました。「👤 プロフ取得（全部取得）」を押してください。';
+    previewBox.textContent = 'お相手を切り替えました。「👤 プロフ取得」を押してください。';
     modeBadge.textContent = '待機中';
     modeBadge.style.background = '#f1f5f9';
     modeBadge.style.color = '#64748b';
