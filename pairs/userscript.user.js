@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      1.8.0
+// @version      1.9.0
 // @description  Pairs(Web版)の全自動コパイロット（画面開く → 情報取得 → 文章生成ボタン押下 → ローカルAI連携入力完了 → 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -153,7 +153,6 @@
             </div>
           </div>
           <div class="copilot-preview" id="copilot-preview-text">取得中...</div>
-          <div style="font-size:10px; color:#94a3b8; margin-top:4px;">※自己紹介文が未取得の場合は右ペインを展開して「🔄 再取得」を押してください</div>
         </div>
 
         <div>
@@ -229,7 +228,7 @@
   rescanBtn.addEventListener('click', () => { extract(); sync(true); });
 
   // -------------------------------------------------------------
-  // 自己紹介文・タグの徹底抽出
+  // 自己紹介文・タグのピンポイント抽出
   // -------------------------------------------------------------
   function extract() {
     try {
@@ -285,6 +284,39 @@
       });
       msgs = [...new Set(msgs)];
 
+      // 🎯 自己紹介文のピンポイント抽出（画像構造: h2"自己紹介" + p）
+      const allHeadings = Array.from(document.querySelectorAll('h1, h2, h3, h4, div, span, p'));
+      for (const hd of allHeadings) {
+        if (chatSet.has(hd) || hd.closest('#pairs-copilot-root')) continue;
+        const hText = hd.innerText?.trim();
+        if (hText === '自己紹介' || hText === '自己紹介文') {
+          const parent = hd.parentElement;
+          const targetP = parent?.querySelector('p') || hd.nextElementSibling?.querySelector('p') || hd.nextElementSibling;
+          if (targetP) {
+            const pText = (targetP.innerText || targetP.textContent || '').trim();
+            if (pText && pText.length >= 10 && pText !== '自己紹介') {
+              profile = pText;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!profile) {
+        const partnerContainers = document.querySelectorAll('[class*="partnerId"], [class*="PromptBoard"], div[class*="-component"]');
+        for (const container of partnerContainers) {
+          if (chatSet.has(container) || container.closest('#pairs-copilot-root')) continue;
+          const p = container.querySelector('p');
+          if (p) {
+            const pText = (p.innerText || p.textContent || '').trim();
+            if (pText && pText.length >= 25) {
+              profile = pText;
+              break;
+            }
+          }
+        }
+      }
+
       // 🏷️ タグ抽出
       document.querySelectorAll('img[src*="community"], img[src*="tag"], img[src*="mytag"], img[alt*="コミュニティ"], img[alt*="タグ"]').forEach(img => {
         const label = img.alt || img.getAttribute('title') || img.parentElement?.innerText?.trim();
@@ -301,40 +333,6 @@
           tags.push(txt);
         }
       });
-
-      // 📝 自己紹介文探索
-      const excludeKeywords = ['利用規約', '通報する', '違反報告', 'ブロックする', 'いいね！', 'スキップ', 'オンライン', '本人確認済', 'メッセージを入力', '写真を送信'];
-      const bioIntroKeywords = ['はじめまして', 'よろしくお願いします', '見ていただき', '休日は', '仕事は', '趣味は', '都内在住', 'カフェ', '映画', 'アニメ', '旅行', '音楽'];
-
-      const candidateElements = document.querySelectorAll('p, div, section, article, [dir="auto"], span, pre');
-      let bestBioText = '';
-      let bestBioScore = -1;
-
-      candidateElements.forEach(el => {
-        if (el.closest('#pairs-copilot-root') || chatSet.has(el)) return;
-        if (el.children.length > 12) return;
-        const text = (el.innerText || el.textContent || '').trim();
-        if (!text || text.length < 15 || text.length > 6000) return;
-        if (excludeKeywords.some(kw => text.includes(kw))) return;
-
-        let score = 0;
-        if (text.length >= 30) score += 20;
-        if (text.length >= 60) score += 30;
-        if (text.length >= 120) score += 35;
-        if (text.includes('\n')) score += 30;
-        if (text.includes('。') || text.includes('、')) score += 20;
-        const particles = (text.match(/[はがをにでのとも]/g) || []).length;
-        if (particles >= 5) score += 25;
-        if (particles >= 15) score += 25;
-        bioIntroKeywords.forEach(kw => { if (text.includes(kw)) score += 25; });
-        if ((el.className || '').toString().match(/intro|bio|profile|about|text|detail/i)) score += 40;
-
-        if (score > bestBioScore) {
-          bestBioScore = score;
-          bestBioText = text;
-        }
-      });
-      profile = bestBioText;
 
       const tweetElem = document.querySelector('[class*="tweet"], [class*="Tweet"], [class*="catchphrase"], [class*="oneWord"], [data-testid*="tweet"]');
       if (tweetElem && !chatSet.has(tweetElem)) tweet = tweetElem.textContent.trim().replace(/^["「『]|["」』]$/g, '');
@@ -391,7 +389,7 @@
       };
 
       const specStr = Object.entries(details).slice(0, 3).map(([k, v]) => `${k}:${v}`).join(' / ');
-      const bioStatus = profile ? `✅ 取得完了:\n${profile.slice(0, 90)}...` : '⚠️ 未取得（右側のプロフィール欄を開いて「🔄 再取得」）';
+      const bioStatus = profile ? `✅ 取得完了:\n${profile.slice(0, 90)}...` : '⚠️ 未取得（右パネルを開いて「🔄 再取得」）';
       const tagStatus = cached.tags.length > 0 ? `✅ ${cached.tags.slice(0, 5).join(', ')}` : '⚠️ タグ未検出';
 
       preview.textContent = `👤 お相手: ${name} (${age || '年齢不明'} / ${location || '居住地不明'})\n${tweet ? `💬 ひとこと: "${tweet}"\n` : ''}${specStr ? `📋 スペック: ${specStr}\n` : ''}🏷️ タグ: ${tagStatus}\n📝 自己紹介文:\n${bioStatus}`;
