@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.4.0
+// @version      3.5.0
 // @description  Pairs(Web版)コパイロット（👤プロフ取得(プロフ画面) / 🔄履歴再取得 ➔ 🚀文章生成 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -260,7 +260,7 @@
       autoSyncToLocal();
       fetchProfileBtn.textContent = '👤 プロフ取得(プロフ画面)';
       fetchProfileBtn.disabled = false;
-      showToast('✅ クエスチョン・マイタグ・全スペックを保存しました！');
+      showToast('✅ いいね・ログイン・全スペックを保存しました！');
     }, 150);
   });
 
@@ -314,9 +314,19 @@
     if (!text) return;
     cachedData.rawProfile = text;
 
+    const loginMatch = text.match(/(オンライン|24時間以内|3日以内|1週間以内|2週間以内|1ヶ月以内|3ヶ月以内|\d+日前|\d+分前|\d+時間前)/);
+    if (loginMatch) {
+      cachedData.loginStatus = loginMatch[1];
+    }
+
+    const likesMatch = text.match(/(\d+\+?\s*いいね[^\n\r]*)/i) || text.match(/(\d+\+?\s*likes?[^\n\r]*)/i);
+    if (likesMatch) {
+      cachedData.likes = likesMatch[1].replace(/\s+/g, ' ').trim();
+    }
+
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    for (let i = 0; i < Math.min(lines.length, 12); i++) {
       const l = lines[i];
       const ageLoc = l.match(/^(\d{2}歳)\s*([^\s\d]+)?/);
       if (ageLoc) {
@@ -325,12 +335,6 @@
         if (i > 0 && lines[i - 1].length <= 20 && !lines[i - 1].includes('Pairs') && !lines[i - 1].includes('戻る')) {
           cachedData.name = lines[i - 1];
         }
-      }
-      if (l.includes('以内') || l.includes('オンライン') || l.includes('日前')) {
-        cachedData.loginStatus = l;
-      }
-      if (l.includes('いいね')) {
-        cachedData.likes = l;
       }
     }
 
@@ -419,7 +423,19 @@
 
       parseProfileTextContent(fullText);
 
-      // ペアーズクエスチョンのDOM直接抽出
+      if (!cachedData.likes || !cachedData.loginStatus) {
+        document.querySelectorAll('div, span, p').forEach(el => {
+          if (el.closest('#pairs-copilot-root')) return;
+          const txt = el.innerText?.trim() || '';
+          if (!cachedData.likes && txt.includes('いいね') && txt.length < 30) {
+            cachedData.likes = txt;
+          }
+          if (!cachedData.loginStatus && (txt.includes('以内') || txt.includes('オンライン')) && txt.length < 15) {
+            cachedData.loginStatus = txt;
+          }
+        });
+      }
+
       let foundQuestions = [];
       const promptBoards = document.querySelectorAll('[class*="PromptBoard"], [class*="prompt"], [class*="Question"], [class*="promptBoard"]');
       promptBoards.forEach(pb => {
@@ -505,6 +521,18 @@
   function extractChatMessages() {
     try {
       const messages = [];
+      const systemIgnoreKeywords = [
+        '話題になりそうな共通点',
+        '一致した本音を確認',
+        'マッチングが成立しました',
+        'Pairsからのお知らせ',
+        '本人確認済み',
+        '安心・安全のための取り組み',
+        'メッセージの送信にあたって',
+        '通報する',
+        'ブロックする'
+      ];
+
       const msgNodes = document.querySelectorAll(
         '[class*="message"], [class*="Message"], [class*="bubble"], [class*="talkItem"], [class*="chat-item"], [data-testid*="message"]'
       );
@@ -513,6 +541,11 @@
         if (node.closest('#pairs-copilot-root')) return;
         const text = node.innerText?.trim();
         if (!text || text.length > 600) return;
+
+        if (systemIgnoreKeywords.some(kw => text.includes(kw))) return;
+
+        if (text.match(/^(\d{1,2}\/\d{1,2}(?:\([日月火水木金土]\))?\s*\d{1,2}:\d{2}|\d{1,2}:\d{2})$/)) return;
+
         const isMine = node.className?.includes('mine') || 
                        node.className?.includes('self') || 
                        node.className?.includes('sent') || 
@@ -520,8 +553,9 @@
                        node.closest('[class*="mine"], [class*="self"], [class*="right"]');
         
         const sender = isMine ? '自分' : cachedData.name;
-        const cleanText = text.replace(/^(既読|未読|\d{1,2}:\d{2})\s*/, '').trim();
-        if (cleanText) {
+        let cleanText = text.replace(/^(?:既読|未読|\d{1,2}\/\d{1,2}(?:\([日月火水木金土]\))?\s*\d{1,2}:\d{2}|\d{1,2}:\d{2})\s*/, '').trim();
+        
+        if (cleanText && cleanText.length >= 2 && !systemIgnoreKeywords.some(kw => cleanText.includes(kw))) {
           messages.push(`${sender}: ${cleanText}`);
         }
       });
@@ -580,8 +614,9 @@
       : (d.question ? `  • ${d.question}` : '  （未取得）');
 
     const previewLines = [
-      `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})${d.likes ? ` [${d.likes}]` : ''}`,
-      d.loginStatus ? `🕒 ログイン: ${d.loginStatus}` : null,
+      `👤 お相手: ${d.name} (${d.age || '年齢不明'} / ${d.location || '居住地不明'})`,
+      `🕒 ログイン: ${d.loginStatus || '（未取得）'}`,
+      `👍 いいね: ${d.likes || '（未取得）'}`,
       `❓ ペアーズクエスチョン:\n${questionLines}`,
       `🏷️ マイタグ（コメント含む ${d.tags.length}件）:\n${tagStatus}`,
       `📋 基本スペック (${Object.keys(d.details).length}項目):\n${specSummary}`,
