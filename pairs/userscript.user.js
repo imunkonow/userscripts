@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.5.0
+// @version      3.6.0
 // @description  Pairs(Web版)コパイロット（👤プロフ取得(プロフ画面) / 🔄履歴再取得 ➔ 🚀文章生成 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -17,6 +17,31 @@
   if (document.getElementById('pairs-copilot-root')) return;
 
   const SERVER_URL = 'http://127.0.0.1:9999';
+
+  function gmFetch(url, options = {}) {
+    return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest !== 'undefined') {
+        GM_xmlhttpRequest({
+          method: options.method || 'GET',
+          url: url,
+          headers: options.headers || {},
+          data: options.body || null,
+          onload: function(res) {
+            resolve({
+              ok: res.status >= 200 && res.status < 300,
+              status: res.status,
+              json: async () => JSON.parse(res.responseText),
+              text: async () => res.responseText
+            });
+          },
+          onerror: function(err) { reject(err); },
+          ontimeout: function(err) { reject(err); }
+        });
+      } else {
+        fetch(url, options).then(resolve).catch(reject);
+      }
+    });
+  }
 
   const style = document.createElement('style');
   style.textContent = `
@@ -629,7 +654,7 @@
   async function autoSyncToLocal() {
     if (!cachedData) return;
     try {
-      const res = await fetch(`${SERVER_URL}/api/dating/sync`, {
+      const res = await gmFetch(`${SERVER_URL}/api/dating/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cachedData)
@@ -684,7 +709,7 @@
 
     let generatedText = '';
     try {
-      const res = await fetch(`${SERVER_URL}/api/dating/generate`, {
+      const res = await gmFetch(`${SERVER_URL}/api/dating/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -695,7 +720,9 @@
           generatedText = json.draft;
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('GM generation error:', e);
+    }
 
     startAiBtn.textContent = '🚀 文章生成';
     startAiBtn.disabled = false;
