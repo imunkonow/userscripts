@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pairs AI Copilot & Local Sync
 // @namespace    https://github.com/pithud/userscripts
-// @version      3.0.0
+// @version      3.0.1
 // @description  Pairs(Web版)コパイロット（👤プロフ全部取得 / 🔄履歴再取得 ➔ 🚀文章生成入力完了 ➔ 手動送信）
 // @author       i
 // @match        https://pairs.lv/*
@@ -257,7 +257,7 @@
       fetchProfileBtn.textContent = '👤 プロフ取得（全部取得）';
       fetchProfileBtn.disabled = false;
       showToast('✅ プロフィール内容を丸ごと全部取得しました！');
-    }, 200);
+    }, 150);
   });
 
   // 2. 履歴再取得
@@ -271,28 +271,35 @@
       fetchChatBtn.textContent = '🔄 履歴再取得';
       fetchChatBtn.disabled = false;
       showToast(`🔄 会話履歴を最新化しました（${cachedData.messages.length}件）`);
-    }, 200);
+    }, 150);
   });
 
   function extractFullProfile() {
     try {
-      let container = document.querySelector('[class*="partnerId"], [class*="PartnerView"], [role="dialog"], main, [class*="messageListRef"]') || document.body;
-      
+      const partnerContainer = document.querySelector('[class*="partnerId"], [class*="PartnerView"], [role="dialog"], main, [class*="messageListRef"]');
       let allText = '';
-      if (container) {
-        const clone = container.cloneNode(true);
-        const panelInClone = clone.querySelector('#pairs-copilot-root');
-        if (panelInClone) panelInClone.remove();
-        allText = clone.innerText.trim();
+
+      if (partnerContainer && partnerContainer.innerText && partnerContainer.innerText.trim().length > 30) {
+        allText = partnerContainer.innerText.trim();
       } else {
         allText = document.body.innerText.trim();
       }
 
-      cachedData.rawProfile = allText;
-      cachedData.profileText = allText;
+      const copilotRoot = document.getElementById('pairs-copilot-root');
+      if (copilotRoot && copilotRoot.innerText) {
+        const copilotText = copilotRoot.innerText.trim();
+        if (copilotText && allText.includes(copilotText)) {
+          allText = allText.replace(copilotText, '').trim();
+        }
+      }
+
+      if (allText) {
+        cachedData.rawProfile = allText;
+        cachedData.profileText = allText;
+      }
 
       const lines = allText.split('\n').map(l => l.trim()).filter(Boolean);
-      for (let i = 0; i < Math.min(lines.length, 12); i++) {
+      for (let i = 0; i < Math.min(lines.length, 15); i++) {
         const line = lines[i];
         const ageMatch = line.match(/(\d{2}歳)/);
         if (ageMatch) {
@@ -307,15 +314,9 @@
       }
 
       for (let i = 0; i < lines.length - 1; i++) {
-        if (lines[i] === 'ニックネーム' && lines[i + 1]) {
-          cachedData.name = lines[i + 1];
-        }
-        if (lines[i] === '年齢' && lines[i + 1]) {
-          cachedData.age = lines[i + 1];
-        }
-        if (lines[i] === '居住地' && lines[i + 1]) {
-          cachedData.location = lines[i + 1];
-        }
+        if (lines[i] === 'ニックネーム' && lines[i + 1]) cachedData.name = lines[i + 1];
+        if (lines[i] === '年齢' && lines[i + 1]) cachedData.age = lines[i + 1];
+        if (lines[i] === '居住地' && lines[i + 1]) cachedData.location = lines[i + 1];
       }
 
       const heightMatch = allText.match(/(\d{3}\s*cm)/i) || allText.match(/身長\s*[\n\t:]*\s*(\d{3}\s*cm?)/i);
